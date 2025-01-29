@@ -1,5 +1,124 @@
 # Dunst changelog
 
+## 1.12.1 -- 2024-12-17
+
+### Changed
+- Improve man pages and add `dunstify(1)`
+- Accept old `height` syntax again (with notice) (#1412)
+- Add `history-clear` and `history-rm` zsh completions (#1418)
+
+### Fixed
+- Memory corruption when reloading (#1413)
+- Fix height calculation regression (#1411)
+- Handle correctly file uri icons (#1409)
+- Fix typos in docs (#1415)
+
+## 1.12.0 -- 2024-11-30
+
+### Added
+- Export rules via dbus with `dunstctl rules [--json]` (#1212)
+- Added checks and messages for missing DBUS\_SESSION\_BUS\_ADDRESS (#1389)
+- Add `-e/--exit` flag to `dunstctl is-paused` to exit with 1 when paused (#1378)
+- Add color gradients for the progress bar (by providing a list of colors instead of one) (#1370)
+- Use TESTDIR env var as the base for the test program (#1376)
+- Add `dunstctl reload` to hot reload the configuration (#1350)
+- Add an optional id to `dunstctl close` (#1351)
+- Print compile-time options in `dunst --version` (#1336)
+
+### Changed
+- BREAKING: Implement dynamic height (changes the the `height` setting, see manual) (#1342)
+- Change the preferred syntax of `offset` from `NxN` to `(N,N)` (#1330)
+- Install the systemd service file in the session.slice (#1397)
+- Open url with `dunstctl action` if no action is present (#1345,#1395)
+- Remove default icons (now no icons are hard-coded) (#1365,#1358)
+- Various updates to documentation and test suite
+
+### Fixed
+- Order of context menu was reversed (#1394,#1375)
+- Resolve ~ and $HOME in `icon_path` (#1383,#1371)
+- Fix broken link to freedesktop's notification specs in man page (#1381)
+- Remove the message about shortcuts deprecation (#1353)
+- Fix vertical padding behaviour (#1342)
+- Fix bash completion (#1347)
+- Fix file suffix for fish completions during installation (#1339)
+
+## 1.11.0 -- 2024-04-15
+
+### Added
+- Add `corners`, `progress_bar_corners` and `icon_corners` options to control which corners to round (#1268)
+- Support GTK/CSS cursor names on Wayland (#1276)
+- Make dunst more portable (#1288)
+- Print detected monitors names (X11) (#1332)
+
+### Changed
+- Make X11 optional in build (this allows wayland-only dunst) (#1290)
+- Shell completions are now official and can be installed from the Makefile (#1262, #1263)
+- Don't search for icon path if icons are disabled (#1301)
+- Eagerly parse and cache colors (#1306)
+- Update dunstctl manpage (#1298)
+- Update documentation (#1315, #1334)
+
+### Fixed
+- Fix settings initialization (this prevented --print and --startup\_notification from working) (#1299)
+- Rework timer logic and fix error about Glib source ID for good (#1308, #1196)
+- Prevent memory corruption in XrmSetDatabase (#1256, #1291)
+- Don't try to print NULL strings (#1323)
+- Do not resolve icon paths twice (#1307, #1314)
+- Don't crash the test suite if librsvg is not present (#1329)
+- Fix memory leak in DBus RuleEnable (#1328)
+- Fix dunstctl rule (#1281)
+- Remove newlines from icon logging (#1296)
+- Prevent make from failing if git tags are not found (#1287)
+- Fix some typos (#1324, #1325, #1279)
+
+## 1.10.0 -- 2024-02-19
+
+### Added
+- Unofficial fish and bash completions (#1205, 1209)
+- Multiple pause levels to allow selective pausing of notifications (#1193)
+- `--startup_notification` option as an alternative to `-startup_notification` (#1208)
+- Expand variables, like `$HOME` in path in your dunstrc. See `man 3 wordexp` for the details (#1215)
+- Support for stable output names for the `monitor` (eDP-1, HDMI-1, etc). This is more relyable than the order of monitors. (#1250)
+- Wayland multiseat and touchscreen support (#1250)
+
+### Changed
+- The cursor is now being drawn by the compositor, making sure the right cursor theme and scaling is being used (#1250)
+
+### Fixed
+- Various documentation issues
+- Icon path not being interpreted as a path (#1210)
+- Handling of some commandline options (#1208)
+- Improved handling of fallback fonts (#1222)
+- Progress bar not rendering correctly for big corner radiusses compared to width (#1227)
+- Whitespace and brackets in dunstctl usage output (#1230, #1233)
+- Errors about Glib source ID spamming the log (#1257)
+- Idle idle_threshold not working anymore in Wayland due to Wayland protocol changes (#1250)
+
+## 1.9.2 -- 2023-04-20
+
+### Fixed
+- Various documentation issues (#1151, #1154, #1162)
+- High cpu usage when `show_age_treshold = -1` (#1164)
+- High cpu usage in some situation. This is often correlated with being idle. (#1158)
+
+## 1.9.1 -- 2023-03-08
+
+### Added
+- zsh completion for dunst and dunstctl (#1107 and #1108)
+- dunstctl `history-clear` command to delete all notifications from history (#1131)
+- dunstctl `history-rm command` to remove a single notification from history (#1128)
+- `progress_bar_corner_radius` option for adding rounded corners to the progress bar (off by default) (#1119)
+- `icon_corner_radius` option for adding rounded corners to notification icons (#1139)
+
+### Changed
+- Make libnotify and dunstify optional in build (#1129)
+
+### Fixed
+- Man page typo's and readability (#1088 and #1121)
+- Length changes not being emitted over D-Bus (#1127)
+- Crash when locking screen with swaylock on Sway (#1148)
+- Dunst using 100% in some configurations with `idle_threshold` turned on (#1140)
+
 ## 1.9.0 -- 2022-06-27
 
 ### Added
@@ -83,13 +202,10 @@
 - Not being able to override anymore raw icons with `new_icon` (#1009)
 - High cpu usage when selecting an action in dmenu or similar. This was caused
   by dunst not going to sleep when waiting for a response. (#898)
-- Updated default values documentation (with help from @profpatch) (#1004 and
-  more)
-
+- Updated default values documentation (with help from @profpatch) (#1004 and more)
 
 ## 1.7.3 -- 2021-12-08
 
-### Added
 ### Changed
 - `follow` is now `none` again by default. This was the case before v1.7.0 as well. (#990).
 
@@ -113,7 +229,7 @@
   ID to `dunstctl history-pop`. (#970)
 - `default_icon` setting for setting the icon when no icons are given (#984)
 - Implemented display size detection in Wayland. (#973)
-### Changed
+
 ### Fixed
 - Text being cut off on X11 when using fractional scaling. (#975)
 - Incorrect hitbox for notification on X11 with scaling. (#980)
@@ -203,12 +319,12 @@
 - Setting settings via command line arguments. (#803)
 - Setting settings via `config.h`. (#803)
 
-## 1.6.1 - 2021-02-21:
+## 1.6.1 -- 2021-02-21:
 
 ### Fixed
 - Incorrect version in Makefile
 
-## 1.6.0 - 2021-02-21:
+## 1.6.0 -- 2021-02-21:
 
 ### Added
 - Wayland support. Dunst now runs natively on wayland. This fixes several bugs
@@ -233,11 +349,11 @@
 - `dunstify` can pass empty appname to libnotify (#768)
 - Incorrect handling of 'do_action, close' mouse action (#778)
 
-# Removed
+### Removed
 
 - `DUNST_COMMAND_{PAUSE,RESUME,TOGGLE}` (#830)
 
-## 1.5.0 - 2020-07-23
+## 1.5.0 -- 2020-07-23
 
 ### Added
 - `min_icon_size` option to automatically scale up icons to a desired value (#674)
@@ -258,7 +374,7 @@
 - Crash when `$HOME` environment variable is unset (#693)
 - Lack of antialiasing with round corners enabled (#713)
 
-## 1.4.1 - 2019-07-03
+## 1.4.1 -- 2019-07-03
 
 ### Fixed
 
@@ -269,7 +385,7 @@
 - Crash when changing DPI while no notifications are displayed (#630)
 - Fullscreen status change not being detected in some cases (#613)
 
-## 1.4.0 - 2019-03-30
+## 1.4.0 -- 2019-03-30
 
 ### Added
 
@@ -309,19 +425,19 @@
 
 - Dependency on libxdg-basedir (#550)
 
-## 1.3.2 - 2018-05-06
+## 1.3.2 -- 2018-05-06
 
 ### Fixed
 
 - Crash when trying to load an invalid or corrupt icon (#512)
 
-## 1.3.1 - 2018-01-30
+## 1.3.1 -- 2018-01-30
 
 ### Fixed
 
 - Race condition resulting in the service files being empty (#488)
 
-## 1.3.0 - 2018-01-05
+## 1.3.0 -- 2018-01-05
 
 ### Added
 - `ellipsize` option to control how long lines should be ellipsized when `word_wrap` is set to `false` (#374)
@@ -357,7 +473,7 @@
 - Dunst does now install the systemd and dbus service files into their proper location given
   by pkg-config. Use `SERVICEDIR_(DBUS|SYSTEMD)` params to overwrite them. (#463)
 
-## 1.2.0 - 2017-07-12
+## 1.2.0 -- 2017-07-12
 
 ### Added
 - `always_run_script` option to run script even if a notification is suppressed
@@ -399,19 +515,19 @@
 - dmenu process being left as a zombie if no option was selected
 - Crash when opening urls parsed from `<a href="">` tags
 
-## 1.1.0 - 2014-07-29
+## 1.1.0 -- 2014-07-29
 - fix nasty memory leak
 - icon support (still work in progress)
 - fix issue where keybindings aren't working when numlock is activated
 
-## 1.0.0 - 2013-04-15
+## 1.0.0 -- 2013-04-15
 - use pango/cairo as drawing backend
 - make use of pangos ability to parse markup
 - support for actions via context menu
 - indicator for actions/urls found
 - use blocking I/O. No more waking up the CPU multiple times per second to check for new dbus messages
 
-## 0.5.0 - 2013-01-26
+## 0.5.0 -- 2013-01-26
 - new default dunstrc
 - frames for window
 - trigger scripts on matching notifications
@@ -420,7 +536,7 @@
 - use own code for ini parsing (this removes inih)
 - progress hints
 
-## 0.4.0 - 2012-09-27
+## 0.4.0 -- 2012-09-27
 - separator between notifications
 - word wrap long lines
 - real transparance
@@ -431,10 +547,10 @@
 - bugfix: forgetting geometry
 - (optional) static configuration
 
-## 0.3.1 - 2012-08-02
+## 0.3.1 -- 2012-08-02
 - fix -mon option
 
-## 0.3.0 - 2012-07-30
+## 0.3.0 -- 2012-07-30
 - full support for Desktop Notification Specification (mandatory parts)
 - option to select monitor on which notifications are shown
 - follow focus
@@ -448,7 +564,7 @@
 - cleanup / bugfixes etc.
 - added dunst.service
 
-## 0.2.0 - 2012-06-26
+## 0.2.0 -- 2012-06-26
 - introduction of dunstrc
 - removed static configuration via config.h
 - don't timeout when user is idle

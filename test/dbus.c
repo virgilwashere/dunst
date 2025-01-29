@@ -208,7 +208,7 @@ void dbus_signal_unsubscribe_closed(struct signal_closed *closed)
         closed->subscription_id = -1;
 }
 
-GVariant *dbus_invoke(const char *method, GVariant *params)
+static GVariant *dbus_invoke_ifac(const char *method, GVariant *params, const char *ifac)
 {
         GDBusConnection *connection_client;
         GVariant *retdata;
@@ -219,7 +219,7 @@ GVariant *dbus_invoke(const char *method, GVariant *params)
                                 connection_client,
                                 FDN_NAME,
                                 FDN_PATH,
-                                FDN_IFAC,
+                                ifac,
                                 method,
                                 params,
                                 NULL,
@@ -235,6 +235,11 @@ GVariant *dbus_invoke(const char *method, GVariant *params)
         g_object_unref(connection_client);
 
         return retdata;
+}
+
+GVariant *dbus_invoke(const char *method, GVariant *params)
+{
+        return dbus_invoke_ifac(method, params, FDN_IFAC);
 }
 
 struct dbus_notification {
@@ -395,7 +400,7 @@ TEST test_dbus_cb_dunst_Properties_Get(void)
         ASSERT_FALSE(g_variant_get_boolean(pause_variant));
         g_variant_unref(pause_variant);
 
-        dunst_status(S_RUNNING, false);
+        dunst_status_int(S_PAUSE_LEVEL, 100);
 
         pause_variant = dbus_cb_dunst_Properties_Get(connection_client,
                                       FDN_NAME,
@@ -467,6 +472,246 @@ TEST test_dbus_cb_dunst_Properties_Set(void)
         PASS();
 }
 
+TEST test_dbus_cb_dunst_Properties_Set_pause_level(void)
+{
+
+        GDBusConnection *connection_client;
+        GError *error = NULL;
+        struct signal_propertieschanged sig = {NULL, NULL, NULL, -1};
+
+        dbus_signal_subscribe_propertieschanged(&sig);
+
+        connection_client = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, NULL);
+
+        GVariant *pause_variant = g_variant_new_uint32(33);
+
+
+       ASSERT(dbus_cb_dunst_Properties_Set(connection_client,
+                                      FDN_NAME,
+                                      FDN_PATH,
+                                      DUNST_IFAC,
+                                      "pauseLevel",
+                                      pause_variant,
+                                      &error,
+                                      NULL));
+
+        if (error) {
+                printf("Error while calling dbus_cb_dunst_Properties_Set: %s\n", error->message);
+                g_error_free(error);
+        }
+
+        uint waiting = 0;
+        while (!sig.interface && waiting < 2000) {
+                usleep(500);
+                waiting++;
+        }
+
+        ASSERT_STR_EQ(sig.interface, DUNST_IFAC);
+
+        guint pauseLevel;
+        g_variant_lookup(sig.array_dict_sv_data, "pauseLevel", "u", &pauseLevel);
+
+        ASSERT(pauseLevel == 33);
+
+        g_variant_unref(pause_variant);
+        g_free(sig.interface);
+        g_variant_unref(sig.array_dict_sv_data);
+        g_variant_unref(sig.array_s_data);
+        dbus_signal_unsubscribe_propertieschanged(&sig);
+        g_object_unref(connection_client);
+        PASS();
+}
+
+TEST test_dbus_cb_dunst_NotificationListHistory(void)
+{
+        struct notification *n = notification_create();
+        gint64 timestamp1 = n->timestamp;
+        n->appname = g_strdup("dunstify");
+        n->summary = g_strdup("Testing");
+        n->urgency = 2;
+        n->stack_tag = g_strdup("test-stack-tag");
+        n->urls = g_strdup("https://dunst-project.org/");
+        const char *urgency1 = notification_urgency_to_string(n->urgency);
+        queues_history_push(n);
+
+        n = notification_create();
+        gint64 timestamp2 = n->timestamp;
+        n->appname = g_strdup("notify-send");
+        n->summary = g_strdup("More testing");
+        n->urgency = 0;
+        n->stack_tag = g_strdup("test-stack-tag");
+        n->urls = g_strdup("https://dunst-project.org/");
+        const char *urgency2 = notification_urgency_to_string(n->urgency);
+        queues_history_push(n);
+
+        GVariant *result = dbus_invoke_ifac("NotificationListHistory", NULL, DUNST_IFAC);
+        ASSERT(result != NULL);
+        ASSERT_STR_EQ("(aa{sv})", g_variant_get_type_string(result));
+
+        GVariantIter tuple_iter;
+        g_variant_iter_init(&tuple_iter, result);
+        GVariant *array = g_variant_iter_next_value(&tuple_iter);
+
+        GVariantIter array_iter;
+        g_variant_iter_init(&array_iter, array);
+        GVariant *dict = g_variant_iter_next_value(&array_iter);
+
+        GVariantDict d;
+        g_variant_dict_init(&d, dict);
+
+        char *str;
+        gint64 int64;
+
+        ASSERT(g_variant_dict_lookup(&d, "appname", "s", &str));
+        ASSERT_STR_EQ("notify-send", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "summary", "s", &str));
+        ASSERT_STR_EQ("More testing", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "timestamp", "x", &int64));
+        ASSERT_EQ(timestamp2, int64);
+
+        ASSERT(g_variant_dict_lookup(&d, "urgency", "s", &str));
+        ASSERT_STR_EQ(urgency2, str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "stack_tag", "s", &str));
+        ASSERT_STR_EQ("test-stack-tag", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "urls", "s", &str));
+        ASSERT_STR_EQ("https://dunst-project.org/", str);
+        g_free(str);
+
+        g_variant_unref(dict);
+        dict = g_variant_iter_next_value(&array_iter);
+        g_variant_dict_clear(&d);
+        g_variant_dict_init(&d, dict);
+
+        ASSERT(g_variant_dict_lookup(&d, "appname", "s", &str));
+        ASSERT_STR_EQ("dunstify", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "summary", "s", &str));
+        ASSERT_STR_EQ("Testing", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "timestamp", "x", &int64));
+        ASSERT_EQ(timestamp1, int64);
+
+        ASSERT(g_variant_dict_lookup(&d, "urgency", "s", &str));
+        ASSERT_STR_EQ(urgency1, str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "stack_tag", "s", &str));
+        ASSERT_STR_EQ("test-stack-tag", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "urls", "s", &str));
+        ASSERT_STR_EQ("https://dunst-project.org/", str);
+        g_free(str);
+
+        g_variant_dict_clear(&d);
+        g_variant_unref(dict);
+        g_variant_unref(array);
+        g_variant_unref(result);
+        queues_history_clear();
+        PASS();
+}
+
+TEST test_dbus_cb_dunst_RuleEnable(void)
+{
+        struct rule *rule = rule_new("test_rule_enable");
+        ASSERT(rule->enabled);
+
+        GVariant *result = dbus_invoke_ifac("RuleEnable", g_variant_new("(si)", "test_rule_enable", 0), DUNST_IFAC);
+        ASSERT(result != NULL);
+        ASSERT(!rule->enabled);
+        g_variant_unref(result);
+
+        result = dbus_invoke_ifac("RuleEnable", g_variant_new("(si)", "test_rule_enable", 1), DUNST_IFAC);
+        ASSERT(result != NULL);
+        ASSERT(rule->enabled);
+        g_variant_unref(result);
+
+        result = dbus_invoke_ifac("RuleEnable", g_variant_new("(si)", "test_rule_enable", 2), DUNST_IFAC);
+        ASSERT(result != NULL);
+        ASSERT(!rule->enabled);
+        g_variant_unref(result);
+
+        rules = g_slist_remove(rules, rule);
+        g_free(rule->name);
+        g_free(rule);
+
+        PASS();
+}
+
+TEST test_dbus_cb_dunst_RuleList(void)
+{
+        struct rule *rule = rule_new("testing RuleList");
+        rule->appname = "dunstify";
+        rule->urgency = URG_CRIT;
+        rule->match_transient = true;
+        rule->fg = (struct color){.r = 0.1, .g = 0.1, .b = 0.1, .a = 1.0};
+
+        GVariant *result = dbus_invoke_ifac("RuleList", NULL, DUNST_IFAC);
+        ASSERT(result != NULL);
+        ASSERT_STR_EQ("(aa{sv})", g_variant_get_type_string(result));
+
+        GVariantIter tuple_iter;
+        g_variant_iter_init(&tuple_iter, result);
+        GVariant *array = g_variant_iter_next_value(&tuple_iter);
+
+        GVariantIter array_iter;
+        g_variant_iter_init(&array_iter, array);
+        GVariant *dict = g_variant_iter_next_value(&array_iter);
+
+        GVariantDict d;
+        g_variant_dict_init(&d, dict);
+
+        char *str;
+        gboolean boolean;
+
+        ASSERT(g_variant_dict_lookup(&d, "name", "s", &str));
+        ASSERT_STR_EQ("testing RuleList", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "enabled", "b", &boolean));
+        ASSERT(boolean);
+
+        ASSERT(!g_variant_dict_lookup(&d, "hide_text", "b", &boolean));
+        ASSERT(!g_variant_dict_lookup(&d, "history_ignore", "b", &boolean));
+
+        ASSERT(g_variant_dict_lookup(&d, "match_transient", "b", &boolean));
+        ASSERT(boolean);
+
+        ASSERT(g_variant_dict_lookup(&d, "appname", "s", &str));
+        ASSERT_STR_EQ("dunstify", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "urgency", "s", &str));
+        ASSERT_STR_EQ("critical", str);
+        g_free(str);
+
+        ASSERT(g_variant_dict_lookup(&d, "fg", "s", &str));
+        ASSERT_STR_EQ("#191919ff", str);
+        g_free(str);
+
+        ASSERT_FALSE(g_variant_dict_lookup(&d, "bg", "s", &str));
+
+        g_variant_dict_clear(&d);
+        g_variant_unref(dict);
+        g_variant_unref(array);
+        g_variant_unref(result);
+        rules = g_slist_remove(rules, rule);
+        g_free(rule->name);
+        g_free(rule);
+
+        PASS();
+}
+
 TEST test_empty_notification(void)
 {
         struct dbus_notification *n = dbus_notification_new();
@@ -507,9 +752,13 @@ TEST test_basic_notification(void)
 
 TEST test_dbus_notify_colors(void)
 {
-        const char *color_frame = "I allow all string values for frame!";
-        const char *color_bg = "I allow all string values for background!";
-        const char *color_fg = "I allow all string values for foreground!";
+        // Valid
+        const char *color_frame = "#ffaaccbb";
+        const char *color_fg = "#fab";
+        // Junk
+        const char *color_bg = "#ff00axaldjnkfs";
+        const char *color_highlight = "Whatever  this is ";
+
         struct notification *n;
         struct dbus_notification *n_dbus;
 
@@ -529,6 +778,9 @@ TEST test_dbus_notify_colors(void)
         g_hash_table_insert(n_dbus->hints,
                             g_strdup("fgcolor"),
                             g_variant_ref_sink(g_variant_new_string(color_fg)));
+        g_hash_table_insert(n_dbus->hints,
+                            g_strdup("hlcolor"),
+                            g_variant_ref_sink(g_variant_new_string(color_highlight)));
 
         guint id;
         ASSERT(dbus_notification_fire(n_dbus, &id));
@@ -538,9 +790,21 @@ TEST test_dbus_notify_colors(void)
 
         n = queues_debug_find_notification_by_id(id);
 
-        ASSERT_STR_EQ(n->colors.frame, color_frame);
-        ASSERT_STR_EQ(n->colors.fg, color_fg);
-        ASSERT_STR_EQ(n->colors.bg, color_bg);
+        // Valid color strings get converted
+        struct color frame = { 1.0, (double)0xaa/0xff, (double)0xcc/0xff, (double)0xbb/0xff };
+        struct color fg = { 1.0, (double)0xaa/0xff, (double)0xbb/0xff, 1.0 };
+
+        ASSERTm("Valid color strings should change the notification color", COLOR_SAME(n->colors.frame, frame));
+        ASSERTm("Valid color strings should change the notification color", COLOR_SAME(n->colors.fg, fg));
+
+        // Invalid color strings are ignored
+        ASSERTm("Invalid color strings should not change the color struct", COLOR_SAME(n->colors.bg, settings.colors_norm.bg));
+
+        ASSERTm("Invalid color strings should not change the gradient struct", n->colors.highlight->length == settings.colors_norm.highlight->length);
+
+        for (size_t i = 0; i < settings.colors_norm.highlight->length; i++)
+                ASSERTm("Invalid color strings should not change the gradient struct",
+                        COLOR_SAME(n->colors.highlight->colors[i], settings.colors_norm.highlight->colors[i]));
 
         dbus_notification_free(n_dbus);
 
@@ -580,7 +844,7 @@ TEST test_hint_transient(void)
                 ASSERT(dbus_notification_fire(n_dbus, &id));
                 ASSERT(id != 0);
 
-                snprintf(msg, sizeof(msg), "In round %ld", i);
+                snprintf(msg, sizeof(msg), "In round %zu", i);
                 ASSERT_EQm(msg, queues_length_waiting(), len+1);
 
                 n = queues_debug_find_notification_by_id(id);
@@ -625,12 +889,12 @@ TEST test_hint_progress(void)
                 ASSERT(dbus_notification_fire(n_dbus, &id));
                 ASSERT(id != 0);
 
-                snprintf(msg, sizeof(msg), "In round %ld", i);
+                snprintf(msg, sizeof(msg), "In round %zu", i);
                 ASSERT_EQm(msg, queues_length_waiting(), len+1);
 
                 n = queues_debug_find_notification_by_id(id);
 
-                snprintf(msg, sizeof(msg), "In round %ld progress should be %i, but is %i", i, n->progress, values[i]);
+                snprintf(msg, sizeof(msg), "In round %zu progress should be %i, but is %i", i, n->progress, values[i]);
                 ASSERT_EQm(msg, values[i], n->progress);
         }
 
@@ -772,7 +1036,7 @@ TEST test_hint_urgency(void)
 
                 n = queues_debug_find_notification_by_id(id);
 
-                snprintf(msg, sizeof(msg), "In round %ld", i);
+                snprintf(msg, sizeof(msg), "In round %zu", i);
                 ASSERT_EQm(msg, values[i], n->urgency);
 
                 queues_notification_close_id(id, REASON_UNDEF);
@@ -989,7 +1253,7 @@ TEST test_close_and_signal(void)
 
 TEST test_get_fdn_daemon_info(void)
 {
-        unsigned int pid_is;
+        guint pid_is;
         pid_t pid_should;
         char *name, *vendor;
         GDBusConnection *conn;
@@ -999,7 +1263,7 @@ TEST test_get_fdn_daemon_info(void)
 
         ASSERT(dbus_get_fdn_daemon_info(conn, &pid_is, &name, &vendor));
 
-        ASSERT_EQ_FMT(pid_should, pid_is, "%d");
+        ASSERT_EQ_FMT(pid_should, (pid_t)pid_is, "%d");
         ASSERT_STR_EQ("dunst", name);
         ASSERT_STR_EQ("knopwob", vendor);
 
@@ -1051,7 +1315,9 @@ TEST test_override_dbus_timeout(void)
         ASSERT_EQ_FMT(expected_timeout, n->timeout, "%" G_GINT64_FORMAT);
 
         dbus_notification_free(n_dbus);
-        rule->enabled = false;
+        rules = g_slist_remove(rules, rule);
+        g_free(rule->name);
+        g_free(rule);
 
         PASS();
 }
@@ -1080,7 +1346,9 @@ TEST test_match_dbus_timeout(void)
         ASSERT_EQ_FMT(expected_timeout, n->timeout, "%" G_GINT64_FORMAT);
 
         dbus_notification_free(n_dbus);
-        rule->enabled = false;
+        rules = g_slist_remove(rules, rule);
+        g_free(rule->name);
+        g_free(rule);
 
         PASS();
 }
@@ -1108,7 +1376,9 @@ TEST test_timeout(void)
         ASSERT_EQ_FMT(expected_timeout, n->timeout, "%" G_GINT64_FORMAT);
 
         dbus_notification_free(n_dbus);
-        rule->enabled = false;
+        rules = g_slist_remove(rules, rule);
+        g_free(rule->name);
+        g_free(rule);
 
         PASS();
 }
@@ -1125,6 +1395,7 @@ gpointer run_threaded_tests(gpointer data)
         RUN_TEST(test_get_fdn_daemon_info);
         RUN_TEST(test_dbus_cb_dunst_Properties_Get);
         RUN_TEST(test_dbus_cb_dunst_Properties_Set);
+        RUN_TEST(test_dbus_cb_dunst_Properties_Set_pause_level);
 
         RUN_TEST(test_empty_notification);
         RUN_TEST(test_basic_notification);
@@ -1147,6 +1418,9 @@ gpointer run_threaded_tests(gpointer data)
         RUN_TEST(test_override_dbus_timeout);
         RUN_TEST(test_match_dbus_timeout);
         RUN_TEST(test_timeout);
+        RUN_TEST(test_dbus_cb_dunst_NotificationListHistory);
+        RUN_TEST(test_dbus_cb_dunst_RuleEnable);
+        RUN_TEST(test_dbus_cb_dunst_RuleList);
 
         RUN_TEST(assert_methodlists_sorted);
 

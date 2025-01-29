@@ -34,26 +34,27 @@ struct rule {
         enum urgency urgency;
         char *action_name;
         enum markup_mode markup;
-        int history_ignore;
-        int match_transient;
-        int set_transient;
-        int skip_display;
-        int word_wrap;
+        gint history_ignore;
+        gint match_transient;
+        gint set_transient;
+        gint skip_display;
+        gint word_wrap;
         int ellipsize;
         int alignment;
-        int hide_text;
+        gint hide_text;
         int icon_position;
         int min_icon_size;
         int max_icon_size;
+        int override_pause_level;
         char *new_icon;
-        char *fg;
-        char *bg;
-        char *highlight;
         char *default_icon;
-        char *fc;
+        struct color fg;
+        struct color bg;
+        struct gradient *highlight;
+        struct color fc;
         char *set_category;
-        const char *format;
-        const char *script;
+        char *format;
+        char *script;
         enum behavior_fullscreen fullscreen;
         bool enabled;
         int progress_bar_alignment;
@@ -74,7 +75,10 @@ extern GSList *rules;
  */
 struct rule *rule_new(const char *name);
 
-void rule_apply(struct rule *r, struct notification *n);
+void rule_free(struct rule *r);
+
+void rule_print(const struct rule *r);
+void rule_apply(struct rule *r, struct notification *n, bool save);
 void rule_apply_all(struct notification *n);
 bool rule_matches_notification(struct rule *r, struct notification *n);
 

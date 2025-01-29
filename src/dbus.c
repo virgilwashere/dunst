@@ -6,14 +6,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "draw.h"
 #include "dunst.h"
 #include "log.h"
 #include "menu.h"
 #include "notification.h"
 #include "queues.h"
 #include "settings.h"
+#include "settings_data.h"
 #include "utils.h"
 #include "rules.h"
+#include "option_parser.h"
 
 #define FDN_PATH "/org/freedesktop/Notifications"
 #define FDN_IFAC "org.freedesktop.Notifications"
@@ -94,9 +97,19 @@ static const char *introspection_xml =
     "            <arg name=\"name\"     type=\"s\"/>"
     "            <arg name=\"state\"    type=\"i\"/>"
     "        </method>"
+    "        <method name=\"RuleList\">"
+    "            <arg direction=\"out\" name=\"rules\"           type=\"aa{sv}\"/>"
+    "        </method>"
+    "        <method name=\"ConfigReload\">"
+    "            <arg direction=\"in\" name=\"configs\"  type=\"as\"/>"
+    "        </method>"
     "        <method name=\"Ping\"                  />"
 
     "        <property name=\"paused\" type=\"b\" access=\"readwrite\">"
+    "            <annotation name=\"org.freedesktop.DBus.Property.EmitsChangedSignal\" value=\"true\"/>"
+    "        </property>"
+
+    "        <property name=\"pauseLevel\" type=\"u\" access=\"readwrite\">"
     "            <annotation name=\"org.freedesktop.DBus.Property.EmitsChangedSignal\" value=\"true\"/>"
     "        </property>"
 
@@ -156,7 +169,6 @@ void dbus_cb_fdn_methods(GDBusConnection *connection,
                         GDBusMethodInvocation *invocation,
                         gpointer user_data)
 {
-
         struct dbus_method *m = bsearch(method_name,
                                         methods_fdn,
                                         G_N_ELEMENTS(methods_fdn),
@@ -182,8 +194,13 @@ DBUS_METHOD(dunst_NotificationPopHistory);
 DBUS_METHOD(dunst_NotificationRemoveFromHistory);
 DBUS_METHOD(dunst_NotificationShow);
 DBUS_METHOD(dunst_RuleEnable);
+DBUS_METHOD(dunst_RuleList);
+DBUS_METHOD(dunst_ConfigReload);
 DBUS_METHOD(dunst_Ping);
+
+// NOTE: Keep the names sorted alphabetically
 static struct dbus_method methods_dunst[] = {
+        {"ConfigReload",                        dbus_cb_dunst_ConfigReload},
         {"ContextMenuCall",                     dbus_cb_dunst_ContextMenuCall},
         {"NotificationAction",                  dbus_cb_dunst_NotificationAction},
         {"NotificationClearHistory",            dbus_cb_dunst_NotificationClearHistory},
@@ -195,6 +212,7 @@ static struct dbus_method methods_dunst[] = {
         {"NotificationShow",                    dbus_cb_dunst_NotificationShow},
         {"Ping",                                dbus_cb_dunst_Ping},
         {"RuleEnable",                          dbus_cb_dunst_RuleEnable},
+        {"RuleList",                            dbus_cb_dunst_RuleList},
 };
 
 void dbus_cb_dunst_methods(GDBusConnection *connection,
@@ -206,7 +224,6 @@ void dbus_cb_dunst_methods(GDBusConnection *connection,
                            GDBusMethodInvocation *invocation,
                            gpointer user_data)
 {
-
         struct dbus_method *m = bsearch(method_name,
                                         methods_dunst,
                                         G_N_ELEMENTS(methods_dunst),
@@ -217,8 +234,7 @@ void dbus_cb_dunst_methods(GDBusConnection *connection,
                 m->method(connection, sender, parameters, invocation);
         } else {
                 LOG_M("Unknown method name: '%s' (sender: '%s').",
-                      method_name,
-                      sender);
+                      method_name, sender);
         }
 }
 
@@ -327,10 +343,8 @@ static void dbus_cb_dunst_NotificationListHistory(GDBusConnection *connection,
 {
         LOG_D("CMD: Listing all notifications from history");
 
-        GVariant *answer = NULL;
-        GVariantBuilder *builder;
-
-        builder = g_variant_builder_new(G_VARIANT_TYPE("aa{sv}"));
+        GVariantBuilder builder;
+        g_variant_builder_init(&builder, G_VARIANT_TYPE("aa{sv}"));
 
         GList *notification_list = queues_get_history();
 
@@ -340,11 +354,12 @@ static void dbus_cb_dunst_NotificationListHistory(GDBusConnection *connection,
                 n = g_list_nth_data(notification_list, i-1);
 
                 GVariantBuilder n_builder;
-
-                g_variant_builder_init(&n_builder, g_variant_type_new("a{sv}"));
+                g_variant_builder_init(&n_builder, G_VARIANT_TYPE("a{sv}"));
 
                 char *body, *msg, *summary, *appname, *category;
                 char *default_action_name, *icon_path;
+                char  *urls, *stack_tag;
+                const char *urgency;
 
                 body      = (n->body      == NULL) ? "" : n->body;
                 msg       = (n->msg       == NULL) ? "" : n->msg;
@@ -354,50 +369,30 @@ static void dbus_cb_dunst_NotificationListHistory(GDBusConnection *connection,
                 default_action_name= (n->default_action_name == NULL) ?
                         "" : n->default_action_name;
                 icon_path = (n->icon_path == NULL) ? "" : n->icon_path;
+                urgency   = notification_urgency_to_string(n->urgency);
+                urls      = (n->urls      == NULL) ? "" : n->urls;
+                stack_tag = (n->stack_tag == NULL) ? "" : n->stack_tag;        
 
-                g_variant_builder_add(&n_builder, "{sv}", "body",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("s"),
-                        g_bytes_new(body, strlen(body)+1), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "message",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("s"),
-                        g_bytes_new(msg, strlen(msg)+1), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "summary",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("s"),
-                        g_bytes_new(summary, strlen(summary)+1), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "appname",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("s"),
-                        g_bytes_new(appname, strlen(appname)+1), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "category",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("s"),
-                        g_bytes_new(category, strlen(category)+1), TRUE));
+                g_variant_builder_add(&n_builder, "{sv}", "body", g_variant_new_string(body));
+                g_variant_builder_add(&n_builder, "{sv}", "message", g_variant_new_string(msg));
+                g_variant_builder_add(&n_builder, "{sv}", "summary", g_variant_new_string(summary));
+                g_variant_builder_add(&n_builder, "{sv}", "appname", g_variant_new_string(appname));
+                g_variant_builder_add(&n_builder, "{sv}", "category", g_variant_new_string(category));
                 g_variant_builder_add(&n_builder, "{sv}", "default_action_name",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("s"),
-                        g_bytes_new(default_action_name,
-                        strlen(default_action_name)+1), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "icon_path",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("s"),
-                        g_bytes_new(icon_path, strlen(icon_path)+1), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "id",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("i"),
-                        g_bytes_new(&n->id, sizeof(int)), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "timestamp",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("x"),
-                        g_bytes_new(&n->timestamp, sizeof(gint64)), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "timeout",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("x"),
-                        g_bytes_new(&n->timeout, sizeof(gint64)), TRUE));
-                g_variant_builder_add(&n_builder, "{sv}", "progress",
-                        g_variant_new_from_bytes(G_VARIANT_TYPE("i"),
-                        g_bytes_new(&n->progress, sizeof(int)), TRUE));
+                        g_variant_new_string(default_action_name));
+                g_variant_builder_add(&n_builder, "{sv}", "icon_path", g_variant_new_string(icon_path));
+                g_variant_builder_add(&n_builder, "{sv}", "id", g_variant_new_int32(n->id));
+                g_variant_builder_add(&n_builder, "{sv}", "timestamp", g_variant_new_int64(n->timestamp));
+                g_variant_builder_add(&n_builder, "{sv}", "timeout", g_variant_new_int64(n->timeout));
+                g_variant_builder_add(&n_builder, "{sv}", "progress", g_variant_new_int32(n->progress));
+                g_variant_builder_add(&n_builder, "{sv}", "urgency", g_variant_new_string(urgency));
+                g_variant_builder_add(&n_builder, "{sv}", "stack_tag", g_variant_new_string(stack_tag));
+                g_variant_builder_add(&n_builder, "{sv}", "urls", g_variant_new_string(urls));
 
-                g_variant_builder_add(builder, "a{sv}", &n_builder);
-
+                g_variant_builder_add(&builder, "a{sv}", &n_builder);
         }
 
-        answer = g_variant_new("(aa{sv})", builder);
-
-        g_clear_pointer(&builder, g_variant_builder_unref);
-        g_dbus_method_invocation_return_value(invocation, answer);
+        g_dbus_method_invocation_return_value(invocation, g_variant_new("(aa{sv})", &builder));
         g_dbus_connection_flush(connection, NULL, NULL, NULL);
 }
 
@@ -435,6 +430,165 @@ static void dbus_cb_dunst_NotificationRemoveFromHistory(GDBusConnection *connect
         g_dbus_connection_flush(connection, NULL, NULL, NULL);
 }
 
+static const char *enum_to_string(const struct string_to_enum_def values[], int enum_value)
+{
+        for (size_t i = 0; values[i].string != NULL; i++) {
+                if (values[i].enum_value == enum_value) {
+                        return values[i].string;
+                }
+        }
+        return NULL;
+}
+
+static void color_entry(const struct color c, GVariantDict *dict, const char *field_name) {
+        char buf[10];
+        if (color_to_string(c, buf)) {
+                g_variant_dict_insert(dict, field_name, "s", buf);
+        }
+}
+
+static void gradient_entry(const struct gradient *grad, GVariantDict *dict, const char *field_name) {
+        if (GRADIENT_VALID(grad)) {
+                if (grad->length == 1) {
+                        color_entry(grad->colors[0], dict, field_name);
+                        return;
+                }
+
+                char **strv = g_malloc((grad->length + 1) * sizeof(char *));
+                for (size_t i = 0; i < grad->length; i++) {
+                        char buf[10];
+                        if (color_to_string(grad->colors[i], buf))
+                                strv[i] = g_strdup(buf);
+                }
+                strv[grad->length] = NULL;
+
+                g_variant_dict_insert(dict, field_name, "^as", strv);
+        }
+}
+
+static void dbus_cb_dunst_RuleList(GDBusConnection *connection,
+                                   const gchar *sender,
+                                   GVariant *parameters,
+                                   GDBusMethodInvocation *invocation)
+{
+        LOG_D("CMD: Listing all configured rules");
+
+        GVariantBuilder builder;
+        g_variant_builder_init(&builder, G_VARIANT_TYPE("aa{sv}"));
+
+        for (GSList *iter = rules; iter; iter = iter->next) {
+                struct rule *r = iter->data;
+
+                if (is_special_section(r->name)) {
+                        continue;
+                }
+
+                GVariantDict dict;
+                g_variant_dict_init(&dict, NULL);
+                g_variant_dict_insert(&dict, "name", "s", r->name);
+
+                // filters - order according to rule_matches_notification
+                g_variant_dict_insert(&dict, "enabled", "b", BOOL2G(r->enabled));
+                // undocumented filter?
+                if (r->match_dbus_timeout > -1)
+                        g_variant_dict_insert(&dict, "match_dbus_timeout", "i", r->match_dbus_timeout);
+                if (r->msg_urgency != URG_NONE)
+                        g_variant_dict_insert(&dict,
+                                              "msg_urgency",
+                                              "s",
+                                              enum_to_string(urgency_enum_data, r->msg_urgency));
+                if (r->match_transient > -1)
+                        g_variant_dict_insert(&dict, "match_transient", "b", BOOL2G(r->match_transient));
+                if (r->appname)
+                        g_variant_dict_insert(&dict, "appname", "s", r->appname);
+                if (r->desktop_entry)
+                        g_variant_dict_insert(&dict, "desktop_entry", "s", r->desktop_entry);
+                if (r->summary)
+                        g_variant_dict_insert(&dict, "summary", "s", r->summary);
+                if (r->body)
+                        g_variant_dict_insert(&dict, "body", "s", r->body);
+                if (r->category)
+                        g_variant_dict_insert(&dict, "category", "s", r->category);
+                if (r->stack_tag)
+                        g_variant_dict_insert(&dict, "stack_tag", "s", r->stack_tag);
+
+                // settings to apply - order according to rule_apply
+                if (r->timeout != -1)
+                        g_variant_dict_insert(&dict, "timeout", "x", r->timeout);
+                if (r->override_dbus_timeout != -1)
+                        g_variant_dict_insert(&dict, "override_dbus_timeout", "x", r->override_dbus_timeout);
+                if (r->urgency != URG_NONE)
+                        g_variant_dict_insert(&dict, "urgency", "s", enum_to_string(urgency_enum_data, r->urgency));
+                if (r->fullscreen != FS_NULL)
+                        g_variant_dict_insert(&dict,
+                                              "fullscreen",
+                                              "s",
+                                              enum_to_string(fullscreen_enum_data, r->fullscreen));
+                if (r->history_ignore != -1)
+                        g_variant_dict_insert(&dict, "history_ignore", "b", BOOL2G(r->history_ignore));
+                if (r->set_transient != -1)
+                        g_variant_dict_insert(&dict, "set_transient", "b", BOOL2G(r->set_transient));
+                if (r->skip_display != -1)
+                        g_variant_dict_insert(&dict, "skip_display", "b", BOOL2G(r->skip_display));
+                if (r->word_wrap != -1)
+                        g_variant_dict_insert(&dict, "word_wrap", "b", BOOL2G(r->word_wrap));
+                if (r->ellipsize != -1)
+                        g_variant_dict_insert(&dict,
+                                              "ellipsize",
+                                              "s",
+                                              enum_to_string(ellipsize_enum_data, r->ellipsize));
+                if (r->alignment != -1)
+                        g_variant_dict_insert(&dict,
+                                              "alignment",
+                                              "s",
+                                              enum_to_string(horizontal_alignment_enum_data, r->alignment));
+                if (r->hide_text != -1)
+                        g_variant_dict_insert(&dict, "hide_text", "b", BOOL2G(r->hide_text));
+                if (r->progress_bar_alignment != -1)
+                        g_variant_dict_insert(&dict,
+                                              "progress_bar_alignment",
+                                              "s",
+                                              enum_to_string(horizontal_alignment_enum_data,
+                                                             r->progress_bar_alignment));
+                if (r->min_icon_size != -1)
+                        g_variant_dict_insert(&dict, "min_icon_size", "i", r->min_icon_size);
+                if (r->max_icon_size != -1)
+                        g_variant_dict_insert(&dict, "max_icon_size", "i", r->max_icon_size);
+                if (r->action_name)
+                        g_variant_dict_insert(&dict, "action_name", "s", r->action_name);
+                if (r->set_category)
+                        g_variant_dict_insert(&dict, "set_category", "s", r->set_category);
+                if (r->markup != MARKUP_NULL)
+                        g_variant_dict_insert(&dict, "markup", "s", enum_to_string(markup_mode_enum_data, r->markup));
+                if (r->icon_position != -1)
+                        g_variant_dict_insert(&dict,
+                                              "icon_position",
+                                              "s",
+                                              enum_to_string(icon_position_enum_data, r->icon_position));
+                color_entry(r->fg, &dict, "fg");
+                color_entry(r->bg, &dict, "bg");
+                gradient_entry(r->highlight, &dict, "highlight");
+                color_entry(r->fc, &dict, "fc");
+                if (r->format)
+                        g_variant_dict_insert(&dict, "format", "s", r->format);
+                if (r->default_icon)
+                        g_variant_dict_insert(&dict, "default_icon", "s", r->default_icon);
+                if (r->new_icon)
+                        g_variant_dict_insert(&dict, "new_icon", "s", r->new_icon);
+                if (r->script)
+                        g_variant_dict_insert(&dict, "script", "s", r->script);
+                if (r->set_stack_tag)
+                        g_variant_dict_insert(&dict, "set_stack_tag", "s", r->set_stack_tag);
+                if (r->override_pause_level != -1)
+                        g_variant_dict_insert(&dict, "override_pause_level", "i", r->override_pause_level);
+
+                g_variant_builder_add_value(&builder, g_variant_dict_end(&dict));
+        }
+
+        g_dbus_method_invocation_return_value(invocation, g_variant_new("(aa{sv})", &builder));
+        g_dbus_connection_flush(connection, NULL, NULL, NULL);
+}
+
 static void dbus_cb_dunst_RuleEnable(GDBusConnection *connection,
                                      const gchar *sender,
                                      GVariant *parameters,
@@ -458,6 +612,7 @@ static void dbus_cb_dunst_RuleEnable(GDBusConnection *connection,
         }
 
         struct rule *target_rule = get_rule(name);
+        g_free(name);
 
         if (target_rule == NULL) {
                 g_dbus_method_invocation_return_error(invocation,
@@ -474,6 +629,19 @@ static void dbus_cb_dunst_RuleEnable(GDBusConnection *connection,
                 target_rule->enabled = true;
         else if (state == 2)
                 target_rule->enabled = !target_rule->enabled;
+
+        g_dbus_method_invocation_return_value(invocation, NULL);
+        g_dbus_connection_flush(connection, NULL, NULL, NULL);
+}
+
+static void dbus_cb_dunst_ConfigReload(GDBusConnection *connection,
+                                       const gchar *sender,
+                                       GVariant *parameters,
+                                       GDBusMethodInvocation *invocation)
+{
+        gchar **configs = NULL;
+        g_variant_get(parameters, "(^as)", &configs);
+        reload(configs);
 
         g_dbus_method_invocation_return_value(invocation, NULL);
         g_dbus_connection_flush(connection, NULL, NULL, NULL);
@@ -506,7 +674,7 @@ static void dbus_cb_GetCapabilities(
         g_variant_builder_add(builder, "s", "body-hyperlinks");
         g_variant_builder_add(builder, "s", "icon-static");
 
-        for (int i = 0; i < sizeof(stack_tag_hints)/sizeof(*stack_tag_hints); ++i)
+        for (size_t i = 0; i < sizeof(stack_tag_hints)/sizeof(*stack_tag_hints); ++i)
                 g_variant_builder_add(builder, "s", stack_tag_hints[i]);
 
         // Since markup isn't a global variable anymore, look it up in the
@@ -598,7 +766,7 @@ static struct notification *dbus_message_to_notification(const gchar *sender, GV
          *
          * Only accept to first one we find.
          */
-        for (int i = 0; i < sizeof(stack_tag_hints)/sizeof(*stack_tag_hints); ++i) {
+        for (size_t i = 0; i < sizeof(stack_tag_hints)/sizeof(*stack_tag_hints); ++i) {
                 if ((dict_value = g_variant_lookup_value(hints, stack_tag_hints[i], G_VARIANT_TYPE_STRING))) {
                         n->stack_tag = g_variant_dup_string(dict_value, NULL);
                         g_variant_unref(dict_value);
@@ -665,25 +833,69 @@ static struct notification *dbus_message_to_notification(const gchar *sender, GV
 
         // Modify these values after the notification is initialized and all rules are applied.
         if ((dict_value = g_variant_lookup_value(hints, "fgcolor", G_VARIANT_TYPE_STRING))) {
-                g_free(n->colors.fg);
-                n->colors.fg = g_variant_dup_string(dict_value, NULL);
+                struct color c;
+                if (string_parse_color(g_variant_get_string(dict_value, NULL), &c)) {
+                        notification_keep_original(n);
+                        if (!COLOR_VALID(n->original->fg)) n->original->fg = n->colors.fg;
+                        n->colors.fg = c;
+                }
                 g_variant_unref(dict_value);
         }
 
         if ((dict_value = g_variant_lookup_value(hints, "bgcolor", G_VARIANT_TYPE_STRING))) {
-                g_free(n->colors.bg);
-                n->colors.bg = g_variant_dup_string(dict_value, NULL);
+                struct color c;
+                if (string_parse_color(g_variant_get_string(dict_value, NULL), &c)) {
+                        notification_keep_original(n);
+                        if (!COLOR_VALID(n->original->bg)) n->original->bg = n->colors.bg;
+                        n->colors.bg = c;
+                }
                 g_variant_unref(dict_value);
         }
 
         if ((dict_value = g_variant_lookup_value(hints, "frcolor", G_VARIANT_TYPE_STRING))) {
-                g_free(n->colors.frame);
-                n->colors.frame = g_variant_dup_string(dict_value, NULL);
+                struct color c;
+                if (string_parse_color(g_variant_get_string(dict_value, NULL), &c)) {
+                        notification_keep_original(n);
+                        if (!COLOR_VALID(n->original->fc)) n->original->fc = n->colors.frame;
+                        n->colors.frame = c;
+                }
                 g_variant_unref(dict_value);
         }
 
-        if ((dict_value = g_variant_lookup_value(hints, "hlcolor", G_VARIANT_TYPE_STRING))) {
-                n->colors.highlight = g_variant_dup_string(dict_value, NULL);
+        if ((dict_value = g_variant_lookup_value(hints, "hlcolor", G_VARIANT_TYPE_STRING_ARRAY))) {
+                char **cols = (char **)g_variant_get_strv(dict_value, NULL);
+                size_t length = g_strv_length(cols);
+                struct gradient *grad = gradient_alloc(length);
+
+                for (size_t i = 0; i < length; i++) {
+                        if (!string_parse_color(cols[i], &grad->colors[i])) {
+                                g_free(grad);
+                                goto end;
+                        }
+                }
+
+
+                gradient_pattern(grad);
+
+                notification_keep_original(n);
+                if (!GRADIENT_VALID(n->original->highlight)) n->original->highlight = gradient_acquire(n->colors.highlight);
+                gradient_release(n->colors.highlight);
+                n->colors.highlight = gradient_acquire(grad);
+
+end:
+                g_variant_unref(dict_value);
+        } else if ((dict_value = g_variant_lookup_value(hints, "hlcolor", G_VARIANT_TYPE_STRING))) {
+                struct color c;
+                if (string_parse_color(g_variant_get_string(dict_value, NULL), &c)) {
+                        struct gradient *grad = gradient_alloc(1);
+                        grad->colors[0] = c;
+                        gradient_pattern(grad);
+
+                        notification_keep_original(n);
+                        if (!GRADIENT_VALID(n->original->highlight)) n->original->highlight = gradient_acquire(n->colors.highlight);
+                        gradient_release(n->colors.highlight);
+                        n->colors.highlight = gradient_acquire(grad);
+                }
                 g_variant_unref(dict_value);
         }
 
@@ -694,9 +906,8 @@ static struct notification *dbus_message_to_notification(const gchar *sender, GV
         return n;
 }
 
-void signal_length_propertieschanged()
+void signal_length_propertieschanged(void)
 {
-
         static unsigned int last_displayed = 0;
         static unsigned int last_history = 0;
         static unsigned int last_waiting = 0;
@@ -750,7 +961,7 @@ void signal_length_propertieschanged()
                                               "PropertiesChanged",
                                               body,
                                               &err);
-                                
+
                 if (err) {
                         LOG_W("Unable to emit signal: %s", err->message);
                         g_error_free(err);
@@ -923,7 +1134,9 @@ GVariant *dbus_cb_dunst_Properties_Get(GDBusConnection *connection,
         struct dunst_status status = dunst_status_get();
 
         if (STR_EQ(property_name, "paused")) {
-                return g_variant_new_boolean(!status.running);
+                return g_variant_new_boolean(status.pause_level != 0);
+        } else if (STR_EQ(property_name, "pauseLevel")) {
+                return g_variant_new_uint32(status.pause_level);
         } else if (STR_EQ(property_name, "displayedLength")) {
                 unsigned int displayed = queues_length_displayed();
                 return g_variant_new_uint32(displayed);
@@ -949,15 +1162,32 @@ gboolean dbus_cb_dunst_Properties_Set(GDBusConnection *connection,
                                       GError **error,
                                       gpointer user_data)
 {
+        int targetPauseLevel = -1;
         if (STR_EQ(property_name, "paused")) {
-                dunst_status(S_RUNNING, !g_variant_get_boolean(value));
+                if (g_variant_get_boolean(value)) {
+                        targetPauseLevel = MAX_PAUSE_LEVEL;
+                } else {
+                        targetPauseLevel = 0;
+                }
+        } else if STR_EQ(property_name, "pauseLevel") {
+                targetPauseLevel = g_variant_get_uint32(value);
+                if (targetPauseLevel > MAX_PAUSE_LEVEL) {
+                        targetPauseLevel = MAX_PAUSE_LEVEL;
+                }
+        }
+
+        if (targetPauseLevel >= 0) {
+                dunst_status_int(S_PAUSE_LEVEL, targetPauseLevel);
                 wake_up();
 
                 GVariantBuilder *builder = g_variant_builder_new(G_VARIANT_TYPE_VARDICT);
                 GVariantBuilder *invalidated_builder = g_variant_builder_new(G_VARIANT_TYPE_STRING_ARRAY);
                 g_variant_builder_add(builder,
                                       "{sv}",
-                                      "paused", g_variant_new_boolean(g_variant_get_boolean(value)));
+                                      "paused", g_variant_new_boolean(targetPauseLevel != 0));
+                g_variant_builder_add(builder,
+                                      "{sv}",
+                                      "pauseLevel", g_variant_new_uint32(targetPauseLevel));
                 g_dbus_connection_emit_signal(connection,
                                               NULL,
                                               object_path,
@@ -981,7 +1211,7 @@ gboolean dbus_cb_dunst_Properties_Set(GDBusConnection *connection,
 
 
 static const GDBusInterfaceVTable interface_vtable_fdn = {
-        dbus_cb_fdn_methods
+        dbus_cb_fdn_methods,
 };
 
 static const GDBusInterfaceVTable interface_vtable_dunst = {
@@ -1155,6 +1385,11 @@ static void dbus_cb_name_lost(GDBusConnection *connection,
                         DIE("Cannot acquire '"FDN_NAME"'.");
                 }
         } else {
+                const char *env = getenv("DBUS_SESSION_BUS_ADDRESS");
+                if (STR_EMPTY(env)) {
+                        LOG_W("DBUS_SESSION_BUS_ADDRESS is blank. Is the dbus session configured correctly?");
+                }
+
                 DIE("Cannot connect to DBus.");
         }
         exit(1);

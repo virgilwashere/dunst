@@ -19,6 +19,7 @@ struct dimensions {
 };
 
 struct screen_info {
+        char *name;
         int id;
         int x;
         int y;
@@ -50,10 +51,28 @@ struct output {
         double (*get_scale)(void);
 };
 
+#ifdef ENABLE_X11
+#define X11_SUPPORT 1
+#else
+#define X11_SUPPORT 0
+#endif
+
+#ifdef ENABLE_WAYLAND
+#define WAYLAND_SUPPORT 1
+#else
+#define WAYLAND_SUPPORT 0
+#endif
+
+#if !WAYLAND_SUPPORT && !X11_SUPPORT
+#error "You have to compile at least one output (X11, Wayland)"
+#endif
+
 /**
  * return an initialized output, selecting the correct output type from either
  * wayland or X11 according to the settings and environment.
  * When the wayland output fails to initilize, it falls back to X11 output.
+ *
+ * Either output is skipped if it was not compiled.
  */
 const struct output* output_create(bool force_xwayland);
 

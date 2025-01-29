@@ -185,19 +185,17 @@ static GdkPixbuf *icon_pixbuf_scale_to_size(GdkPixbuf *pixbuf, double dpi_scale,
 
 GdkPixbuf *get_pixbuf_from_file(const char *filename, int min_size, int max_size, double scale)
 {
-        char *path = string_to_path(g_strdup(filename));
         GError *error = NULL;
         gint w, h;
 
-        if (!gdk_pixbuf_get_file_info (path, &w, &h)) {
-                LOG_W("Failed to load image info for %s", filename);
-                g_free(path);
+        if (!gdk_pixbuf_get_file_info (filename, &w, &h)) {
+                LOG_W("Failed to load image info for %s", STR_NN(filename));
                 return NULL;
         }
         GdkPixbuf *pixbuf = NULL;
         // TODO immediately rescale icon upon scale changes
         icon_size_clamp(&w, &h, min_size, max_size);
-        pixbuf = gdk_pixbuf_new_from_file_at_scale(path,
+        pixbuf = gdk_pixbuf_new_from_file_at_scale(filename,
                         round(w * scale),
                         round(h * scale),
                         TRUE,
@@ -208,68 +206,72 @@ GdkPixbuf *get_pixbuf_from_file(const char *filename, int min_size, int max_size
                 g_error_free(error);
         }
 
-        g_free(path);
         return pixbuf;
 }
 
 char *get_path_from_icon_name(const char *iconname, int size)
 {
-        if (settings.enable_recursive_icon_lookup) {
-                char *path = find_icon_path(iconname, size);
-                LOG_I("Found icon at %s", path);
-                return path;
-        }
         if (STR_EMPTY(iconname))
                 return NULL;
 
-        const char *suffixes[] = { ".svg", ".svgz", ".png", ".xpm", NULL };
-        gchar *uri_path = NULL;
-        char *new_name = NULL;
-
         if (g_str_has_prefix(iconname, "file://")) {
-                uri_path = g_filename_from_uri(iconname, NULL, NULL);
-                if (uri_path)
-                        iconname = uri_path;
+                char *uri_path = g_filename_from_uri(iconname, NULL, NULL);
+                if (STR_EMPTY(uri_path)) {
+                        LOG_W("Invalid file uri '%s'", iconname);
+                        return NULL;
+                }
+                return uri_path;
+        } else if (iconname[0] == '/' || iconname[0] == '~') {
+                // NOTE: Paths starting with ~ should have already been handled at this point
+                return g_strdup(iconname);
+        } else if (settings.enable_recursive_icon_lookup) {
+                char *path = find_icon_path(iconname, size);
+                if (STR_EMPTY(path))
+                        LOG_W("Icon '%s' not found in themes", iconname);
+                else
+                        LOG_I("Found icon '%s' at %s", iconname, STR_NN(path));
+                return path;
         }
 
-        /* absolute path? */
-        if (iconname[0] == '/' || iconname[0] == '~') {
-                new_name = g_strdup(iconname);
-        } else {
-        /* search in icon_path */
-                char *start = settings.icon_path,
-                     *end, *current_folder, *maybe_icon_path;
-                do {
-                        end = strchr(start, ':');
-                        if (!end) end = strchr(settings.icon_path, '\0'); /* end = end of string */
+        // Search icon_path
+        const char *suffixes[] = { ".svg", ".svgz", ".png", ".xpm", NULL };
+        char *start = settings.icon_path, *end, *current_folder, *maybe_icon_path, *path = NULL;
 
-                        current_folder = g_strndup(start, end - start);
+        do {
+                end = strchr(start, ':');
+                if (!end) end = strchr(settings.icon_path, '\0'); /* end = end of string */
 
-                        for (const char **suf = suffixes; *suf; suf++) {
-                                gchar *name_with_extension = g_strconcat(iconname, *suf, NULL);
-                                maybe_icon_path = g_build_filename(current_folder, name_with_extension, NULL);
-                                if (is_readable_file(maybe_icon_path)) {
-                                        new_name = g_strdup(maybe_icon_path);
-                                }
-                                g_free(name_with_extension);
-                                g_free(maybe_icon_path);
+                current_folder = string_to_path(g_strndup(start, end - start));
 
-                                if (new_name)
-                                        break;
+                for (const char **suf = suffixes; *suf; suf++) {
+                        gchar *name_with_extension = g_strconcat(iconname, *suf, NULL);
+                        maybe_icon_path = g_build_filename(current_folder, name_with_extension, NULL);
+                        if (is_readable_file(maybe_icon_path)) {
+                                path = g_strdup(maybe_icon_path);
                         }
+                        g_free(name_with_extension);
+                        g_free(maybe_icon_path);
 
-                        g_free(current_folder);
-                        if (new_name)
-                                break;
+                        if (path) break;
+                }
+                g_free(current_folder);
 
-                        start = end + 1;
-                } while (STR_FULL(end));
-                if (!new_name)
-                        LOG_W("No icon found in path: '%s'", iconname);
-        }
+                if (path) break;
+                start = end + 1;
+        } while (STR_FULL(end));
 
-        g_free(uri_path);
-        return new_name;
+        if (STR_EMPTY(path))
+                LOG_W("Icon '%s' not found in icon_path", iconname);
+        else
+                LOG_I("Found icon '%s' at %s", iconname, path);
+
+        return path;
+}
+
+static void icon_destroy(guchar *pixels, gpointer data)
+{
+        (void)data;
+        g_free(pixels);
 }
 
 GdkPixbuf *icon_get_for_data(GVariant *data, char **id, double dpi_scale, int min_size, int max_size)
@@ -355,7 +357,7 @@ GdkPixbuf *icon_get_for_data(GVariant *data, char **id, double dpi_scale, int mi
                                           width,
                                           height,
                                           rowstride,
-                                          (GdkPixbufDestroyNotify) g_free,
+                                          icon_destroy,
                                           data_pb);
         if (!pixbuf) {
                 /* Dear user, I'm sorry, I'd like to give you a more specific

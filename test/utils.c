@@ -1,3 +1,7 @@
+#if defined(__linux__)
+#include <features.h>
+#endif
+
 #include "../src/utils.c"
 #include "greatest.h"
 
@@ -152,6 +156,7 @@ TEST test_string_to_path(void)
         ASSERT_STR_EQ(exp, (ptr = string_to_path(g_strdup(exp))));
         free(ptr);
 
+        // This might fail, when a user named path exists on the host running the tests.
         exp = "~path/with/wrong/tilde";
         ASSERT_STR_EQ(exp, (ptr = string_to_path(g_strdup(exp))));
         free(ptr);
@@ -165,6 +170,19 @@ TEST test_string_to_path(void)
                       (ptr = string_to_path(g_strdup("~/.path/with/tilde and some space"))));
         free(exp);
         free(ptr);
+
+        ASSERT_STR_EQ((exp = g_strconcat(home, "/.path/with/HOME environment variable", NULL)),
+                      (ptr = string_to_path(g_strdup("$HOME/.path/with/HOME environment variable"))));
+        free(exp);
+        free(ptr);
+
+// Just glibc properly returns an error when using `WRDE_UNDEF` and an
+// undefined variable is found. musl accepts this flag and ignores it.
+#ifdef __GLIBC__
+        exp = "/some/$UNDEFINED/variable";
+        ASSERT_STR_EQ(exp, (ptr = string_to_path(g_strdup(exp))));
+        free(ptr);
+#endif
 
         PASS();
 }

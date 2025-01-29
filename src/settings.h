@@ -8,12 +8,28 @@
 #include "wayland/protocols/wlr-layer-shell-unstable-v1-client-header.h"
 #endif
 
-#include "notification.h"
+#ifdef ENABLE_X11
 #include "x11/x.h"
+#endif
+
+// Note: Wayland doesn't support hotkeys
+struct keyboard_shortcut {
+        char *str;
+#ifdef ENABLE_X11
+        KeyCode code;
+        KeySym sym;
+        KeySym mask;
+        bool is_valid;
+#endif
+};
+
+#include "notification.h"
+#include "draw.h"
 
 #define LIST_END (-1)
 
 enum alignment { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT };
+enum sort_type { SORT_TYPE_ID, SORT_TYPE_URGENCY_ASCENDING, SORT_TYPE_URGENCY_DESCENDING, SORT_TYPE_UPDATE };
 enum vertical_alignment { VERTICAL_TOP, VERTICAL_CENTER, VERTICAL_BOTTOM };
 enum separator_color { SEP_FOREGROUND, SEP_AUTO, SEP_FRAME, SEP_CUSTOM };
 enum follow_mode { FOLLOW_NONE, FOLLOW_MOUSE, FOLLOW_KEYBOARD };
@@ -67,12 +83,12 @@ enum origin_values {
 
 // TODO make a TYPE_CMD, instead of using TYPE_PATH for settings like dmenu and browser
 enum setting_type { TYPE_MIN = 0, TYPE_INT, TYPE_DOUBLE, TYPE_STRING,
-        TYPE_PATH, TYPE_TIME, TYPE_LIST, TYPE_CUSTOM, TYPE_LENGTH,
-        TYPE_DEPRECATED, TYPE_MAX = TYPE_DEPRECATED + 1 }; // to be implemented
+        TYPE_PATH, TYPE_TIME, TYPE_LIST, TYPE_CUSTOM, TYPE_LENGTH, TYPE_COLOR,
+        TYPE_GRADIENT, TYPE_DEPRECATED, TYPE_MAX = TYPE_DEPRECATED + 1 }; // to be implemented
 
 struct separator_color_data {
         enum separator_color type;
-        char *sep_color;
+        struct color color;
 };
 
 struct length {
@@ -101,7 +117,7 @@ struct settings {
         char *title;
         char *class;
         int shrink;
-        int sort;
+        enum sort_type sort;
         int indicate_hidden;
         gint64 idle_threshold;
         gint64 show_age_threshold;
@@ -118,9 +134,10 @@ struct settings {
         int text_icon_padding;
         struct separator_color_data sep_color;
         int frame_width;
-        char *frame_color;
+        struct color frame_color;
         int startup_notification;
-        int monitor;
+        char *monitor;
+        int monitor_num;
         double scale;
         char *dmenu;
         char **dmenu_cmd;
@@ -149,19 +166,25 @@ struct settings {
         int progress_bar_frame_width;
         int progress_bar_corner_radius;
         int icon_corner_radius;
+        enum corner_pos corners;
+        enum corner_pos icon_corners;
+        enum corner_pos progress_bar_corners;
         bool progress_bar;
         enum zwlr_layer_shell_v1_layer layer;
         enum origin_values origin;
         struct length width;
-        int height;
-        struct position offset;
+        struct length height;
+        struct position offset; // NOTE: we rely on the fact that lenght and position are similar
         int notification_limit;
         int gap_size;
 };
 
 extern struct settings settings;
+extern bool print_notifications;
 
-void load_settings(const char * const path);
+void load_settings(char **const config_paths);
+
+void settings_free(struct settings *s);
 
 #endif
 /* vim: set ft=c tabstop=8 shiftwidth=8 expandtab textwidth=0: */

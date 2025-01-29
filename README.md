@@ -8,12 +8,12 @@
 
 ## Table of Contents
 
-* [Features](#features)
-* [Building](#building)
-* [Contributing](#contributing)
-* [Documentation](#documentation)
-* [Troubleshooting](#troubleshooting)
-* [Copyright](#copyright)
+- [Features](#features)
+- [Building](#building)
+- [Contributing](#contributing)
+- [Documentation](#documentation)
+- [Troubleshooting](#troubleshooting)
+- [Copyright](#copyright)
 
 # Features
 
@@ -56,6 +56,10 @@ If you want to take a break and not receive any notifications for a while, just
 pause dunst. All notifications will be saved for you to catch up
 later.
 
+Additionally, you can set a numeric pause level, which allows you to pause dunst
+selectively for some notifications, where more urgent notifications get through,
+but less urgent stay paused.
+
 ## 🕘 History
 
 Catch an unread notification disappearing from the corner of your eye? Just tap
@@ -86,10 +90,13 @@ distro's repositories, don't worry, it's not hard to build it yourself.
 - libxss
 - glib
 - pango/cairo
+- gdk-pixbuf
 - libnotify (can build without, for dunstify, see [make parameters](#make-parameters))
 - wayland-client (can build without, see [make parameters](#make-parameters))
 - wayland-protocols (optional, for recompiling protocols)
 - xdg-utils (optional, xdg-open is the default 'browser' for opening URLs)
+- jq (optional, for installed completions and tools in contrib)
+- busctl (optional, for dunstctl rules and dunstctl history)
 
 The names will be different depending on your [distribution](https://github.com/dunst-project/dunst/wiki/Dependencies).
 
@@ -108,25 +115,32 @@ sudo make install
 - `PREFIX=<PATH>`: Set the prefix of the installation. (Default: `/usr/local`)
 - `BINDIR=<PATH>`: Set the `dunst` executable's path (Default: `${PREFIX}/bin`)
 - `DATADIR=<PATH>`: Set the path for shared files. (Default: `${PREFIX}/share`)
+- `BASHCOMPLETIONDIR=<PATH>`: Set the path for installation of bash completion files. (Default: `${DATADIR}/bash-completion/completions`)
+- `FISHCOMPLETIONDIR=<PATH>`: Set the path for installation of fish completion files. (Default: `${DATADIR}/fish/vendor_completions.d`)
+- `ZSHCOMPLETIONDIR=<PATH>`: Set the path for installation of zsh completion files. (Default: `${DATADIR}/zsh/site-functions`)
 - `SYSCONFDIR=<PATH>`: Set the base directory for system config files. (Default: `${PREFIX}/etc/xdg`)
 - `SYSCONFFILE=<PATH>`: Set the absolute path to which the default dunstrc shall be installed. (Default: `${SYSCONFDIR}/dunst/dunstrc`)
 - `SYSCONF_FORCE_NEW=(0|1)`: Overwrite existing `${SYSCONFFILE}`. (Default: 0 (don't overwrite))
 - `MANDIR=<PATH>`: Set the prefix of the manpage. (Default: `${DATADIR}/man`)
 - `SYSTEMD=(0|1)`: Disable/Enable the systemd unit. (Default: autodetect systemd)
 - `WAYLAND=(0|1)`: Disable/Enable wayland support. (Default: 1 (enabled))
+- `X11=(0|1)`: Disable/Enable X11 support. (Default: 1 (enabled))
 - `DUNSTIFY=(0|1)`: Disable/Enable the libnotify dunstctl utility. (Default: 1 (enabled))
+- `COMPLETIONS=(0|1)`: Disable/Enable installation of shell completions. (Default: 1 (enabled))
 - `SERVICEDIR_SYSTEMD=<PATH>`: The path to put the systemd user service file. Unused, if `SYSTEMD=0`. (Default: `${PREFIX}/lib/systemd/user`)
 - `SERVICEDIR_DBUS=<PATH>`: The path to put the dbus service file. (Default: `${DATADIR}/dbus-1/services`)
 - `EXTRA_CFLAGS=<FLAGS>`: Additional flags for the compiler.
 
 **Make sure to run all make calls with the same parameter set. So when building with `make PREFIX=/usr`, you have to install it with `make PREFIX=/usr install`, too.**
 
+**Either X11 or WAYLAND should be set, otherwise dunst will not compile.**
+
 **Notes on default of XDG_CONFIG_DIRS**
 
-Dunst uses a different default (${SYSCONFDIR}) for XDG_CONFIG_DIRS at runtime.
+Dunst uses a different default (`${SYSCONFDIR}`) for XDG_CONFIG_DIRS at runtime.
 This is a slight digression from the recommended value in the XDG Base Directory
 Specification (/etc/xdg), because the default config file gets installed to
-${SYSCONFDIR/dunst/dunstrc} to avoid conflicts with /etc/xdg/dunst/dunstrc which
+`${SYSCONFDIR}/dunst/dunstrc` to avoid conflicts with /etc/xdg/dunst/dunstrc which
 might have been installed from a distribution repository. If you do want dunst
 to use the spec's recommended default, set XDG_CONFIG_DIR=/etc/xdg at runtime or
 SYSCONFDIR=/etc/xdg at compile time.
@@ -179,6 +193,13 @@ Please use the [issue tracker][issue-tracker] provided by GitHub to send us bug 
 ## Maintainers
 
 - [Friso Smit](https://github.com/fwsmit) <fw.smit01@gmail.com>
+- [Bjoern Hiller](https://github.com/zappolowski) <bjoern.hiller@gmail.com>
+- [Federico Angelilli](https://github.com/bynect) <fedeangemail@gmail.com>
+
+Please only refer to active maintainers for issues and bugs.
+
+## Ex-Maintainers
+
 - [Nikos Tsipinakis](https://github.com/tsipinakis) <nikos@tsipinakis.com>
 - [Benedikt Heine](https://github.com/bebehei) <bebe@bebehei.de>
 
@@ -190,7 +211,7 @@ Written by Sascha Kruse <dunst@knopwob.de>
 
 Copyright 2013 Sascha Kruse and contributors (see [`LICENSE`](./LICENSE) for licensing information)
 
-[issue-tracker]:  https://github.com/dunst-project/dunst/issues
+[issue-tracker]: https://github.com/dunst-project/dunst/issues
 [wiki]: https://github.com/dunst-project/dunst/wiki
 [website]: https://dunst-project.org
 [FAQ]: https://dunst-project.org/faq

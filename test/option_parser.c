@@ -139,9 +139,9 @@ TEST test_string_to_int(void)
         struct setting s;
         s.type = TYPE_INT;
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERTm(buf, set_from_string(&val, s, inputs[i]));
                 ASSERT_EQm(buf, val, results[i]);
         }
@@ -166,9 +166,9 @@ TEST test_string_to_int_invalid(void)
         s.type = TYPE_INT;
         s.name = "test_int";
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERT_FALSEm(buf, set_from_string(&val, s, inputs[i]));
         }
         ASSERT_EQm("Value should not be changed for invalid ints", val, -123);
@@ -199,9 +199,9 @@ TEST test_string_to_double(void)
         struct setting s;
         s.type = TYPE_DOUBLE;
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERTm(buf, set_from_string(&val, s, inputs[i]));
                 ASSERT_EQm(buf, val, results[i]);
         }
@@ -225,9 +225,9 @@ TEST test_string_to_double_invalid(void)
         s.type = TYPE_DOUBLE;
         s.name = "test_double";
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERT_FALSEm(buf, set_from_string(&val, s, inputs[i]));
         }
         ASSERT_EQm("Value should not be changed for invalid doubles", val, -100.0);
@@ -263,11 +263,11 @@ TEST test_string_to_boolean(void)
 
         ARRAY_SAME_LENGTH(inputs, results);
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERTm(buf, set_from_string(&val, s, inputs[i]));
-                sprintf(buf, "Failed in round %i. %i should be %i", i, val, results[i]);
+                sprintf(buf, "Failed in round %zu. %i should be %i", i, val, results[i]);
                 ASSERT_EQm(buf, val, results[i]);
         }
         PASS();
@@ -291,10 +291,9 @@ TEST test_string_to_boolean_invalid(void)
                 "else",
         };
 
-        char buf[50];
-
-        for (int i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 bool success = set_from_string(&val, s, invalid_inputs[i]);
                 ASSERT_FALSEm(buf, success);
         }
@@ -312,11 +311,11 @@ TEST test_string_to_enum(void)
         s.parser = string_parse_enum;
         s.parser_data = ellipsize_enum_data;
 
-        char buf[50];
+        static char buf[50];
 
         // do not go until last element, since it's ENUM_END (all 0)
-        for (int i = 0; i < G_N_ELEMENTS(ellipsize_enum_data)-1; i++) {
-                sprintf(buf, "Failed in round %i", i);
+        for (size_t i = 0; i < G_N_ELEMENTS(ellipsize_enum_data)-1; i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERTm(buf, set_from_string(&val, s, ellipsize_enum_data[i].string));
                 ASSERT_EQm(buf, val, ellipsize_enum_data[i].enum_value);
         }
@@ -342,10 +341,10 @@ TEST test_string_to_enum_invalid(void)
                 "else"
         };
 
-        char buf[50];
+        static char buf[50];
 
-        for (int i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        for (size_t i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERT_FALSEm(buf, set_from_string(&val, s, invalid_inputs[i]));
         }
         ASSERT_EQm("Enum should not change from invalid values", val, -123);
@@ -383,13 +382,13 @@ TEST test_string_to_list(void)
                 {MOUSE_CLOSE_ALL, MOUSE_CLOSE_CURRENT, MOUSE_CLOSE_ALL, MOUSE_ACTION_END},
         };
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[100];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERTm(buf, set_from_string(s.value, s, inputs[i]));
                 ASSERT_EQm(buf, get_list_len(val), get_list_len(results[i]));
-                for (int j = 0; val[j] != MOUSE_ACTION_END; j++) {
-                        sprintf(buf, "Failed in round %i, element %i. Is %i, should be %i", i, j, val[j], results[i][j]);
+                for (size_t j = 0; val[j] != MOUSE_ACTION_END; j++) {
+                        sprintf(buf, "Failed in round %zu, element %zu. Is %i, should be %i", i, j, val[j], results[i][j]);
                         ASSERT_EQm(buf, val[j], results[i][j]);
                 }
         }
@@ -425,10 +424,9 @@ TEST test_string_to_list_invalid(void)
                 "close_all,invalid,close_current,close_all",
         };
 
-        char buf[256];
-
-        for (int i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[256];
+        for (size_t i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERT_FALSEm(buf, set_from_string(&val, s, invalid_inputs[i]));
         }
         sprintf(buf,"List should not change from invalid values. Expected length %i, got %i", len, get_list_len(val));
@@ -465,11 +463,11 @@ TEST test_string_to_time(void)
 
         ARRAY_SAME_LENGTH(inputs, results);
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERTm(buf, set_from_string(&val, s, inputs[i]));
-                sprintf(buf, "Failed in round %i. %li should be %i", i, val, results[i]);
+                sprintf(buf, "Failed in round %zu. %"G_GINT64_FORMAT" should be %i", i, val, results[i]);
                 ASSERT_EQm(buf, val, results[i]);
         }
         PASS();
@@ -495,9 +493,9 @@ TEST test_string_to_time_invalid(void)
                 "s",
         };
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERT_FALSEm(buf, set_from_string(&val, s, invalid_inputs[i]));
         }
         ASSERT_EQm("Time should not change from invalid values", val, 1234);
@@ -521,9 +519,14 @@ TEST test_string_to_path(void)
                 "/path/p argument",
                 "p with multiple arguments",
                 "~/p/p",
+                "$HOME/p/p",
+                "$TEST_ENV/p/p",
         };
 
+        setenv("TEST_ENV", "foobar", 1);
+
         char *expanded_home = g_strconcat(user_get_home(), "/", "p/p", NULL);
+        char *expanded_env = g_strconcat("foobar", "/p/p", NULL);
         const char* results[] = {
                 "/bin/something",
                 "something",
@@ -531,6 +534,8 @@ TEST test_string_to_path(void)
                 "/path/p argument",
                 "p with multiple arguments",
                 expanded_home,
+                expanded_home,
+                expanded_env,
         };
 
         const char* results2[][5] = {
@@ -540,23 +545,26 @@ TEST test_string_to_path(void)
                 {"/path/p", "argument", NULL},
                 {"p", "with", "multiple", "arguments", NULL},
                 {expanded_home},
+                {expanded_home},
+                {expanded_env},
         };
 
         ARRAY_SAME_LENGTH(inputs, results);
         ARRAY_SAME_LENGTH(inputs, results2);
 
-        char buf[256];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i", i);
+        static char buf[256];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERTm(buf, set_from_string(&val, s, inputs[i]));
-                sprintf(buf, "Failed in round %i. %s should be %s", i, val, results[i]);
+                sprintf(buf, "Failed in round %zu. %s should be %s", i, val, results[i]);
                 ASSERTm(buf, STR_EQ(val, results[i]));
-                for (int j = 0; results2[i][j] != NULL; j++) {
+                for (size_t j = 0; results2[i][j] != NULL; j++) {
                         ASSERT_STR_EQ(results2[i][j], val2[j]);
                 }
         }
 
         g_free(val);
+        g_free(expanded_env);
         g_free(expanded_home);
         g_strfreev(val2);
         PASS();
@@ -582,32 +590,35 @@ TEST test_string_to_sepcolor(void)
         };
 
         const struct separator_color_data results[] = {
-                {SEP_AUTO, NULL},
-                {SEP_FOREGROUND, NULL},
-                {SEP_FRAME, NULL},
-                {SEP_CUSTOM, "#123456"},
-                {SEP_CUSTOM, "#ab123c"},
-                {SEP_CUSTOM, "#AB123C"},
+                {SEP_AUTO, COLOR_UNINIT},
+                {SEP_FOREGROUND, COLOR_UNINIT},
+                {SEP_FRAME, COLOR_UNINIT},
+                {SEP_CUSTOM, { (double)0x12 / 0xff, (double)0x34 / 0xff, (double)0x56 / 0xff, 1.0}},
+                {SEP_CUSTOM, { (double)0xab / 0xff, (double)0x12 / 0xff, (double)0x3c / 0xff, 1.0}},
+                {SEP_CUSTOM, { (double)0xab / 0xff, (double)0x12 / 0xff, (double)0x3c / 0xff, 1.0}},
         };
 
         ARRAY_SAME_LENGTH(inputs, results);
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i. Expected %i, got %i", i, results[i].type, val.type);
+        static char buf[100];
+        char buf1[10], buf2[10];
+
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu. Expected %i, got %i", i, results[i].type, val.type);
                 ASSERTm(buf, set_from_string(&val, s, inputs[i]));
                 ASSERT_EQm(buf, results[i].type, val.type);
-                sprintf(buf, "Failed in round %i. Expected %s, got %s", i, results[i].sep_color, val.sep_color);
-                ASSERTm(buf, STR_EQ(results[i].sep_color, val.sep_color));
+
+                sprintf(buf, "Failed in round %zu. Expected %s, got %s", i,
+                                color_to_string(results[i].color, buf1), color_to_string(val.color, buf2));
+                ASSERTm(buf, (!COLOR_VALID(val.color) && !COLOR_VALID(results[i].color)) || COLOR_SAME(results[i].color, val.color));
         }
 
-        g_free(val.sep_color);
         PASS();
 }
 
 TEST test_string_to_sepcolor_invalid(void)
 {
-        struct separator_color_data val = {123, "test123"};
+        struct separator_color_data val = {123, COLOR_UNINIT};
         struct setting s;
         s.type = TYPE_CUSTOM;
         s.value = &val;
@@ -621,21 +632,161 @@ TEST test_string_to_sepcolor_invalid(void)
                 "fraame",
                 "123456",
                 "#ab",
-
-                // TODO detect these mistakes as well
-                /* "#12456", */
-                /* "#gg123c", */
-                /* "#AB123C123212", */
+                "#gg123c",
+                "#AB123C123212",
         };
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i.", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERT_FALSEm(buf, set_from_string(&val, s, inputs[i]));
         }
 
         ASSERT_EQm("Sep color shouldn't changed from invalid inputs", 123, (int) val.type);
-        ASSERT_STR_EQm("Sep color shouldn't changed from invalid inputs", "test123", val.sep_color);
+        ASSERTm("Sep color shouldn't changed from invalid inputs", !COLOR_VALID(val.color));
+        PASS();
+}
+
+TEST test_string_to_color(void)
+{
+        struct color val = COLOR_UNINIT;
+        struct setting s;
+        s.type = TYPE_COLOR;
+        s.value = &val;
+        s.name = "test_color";
+
+        const char* inputs[] = {
+                "#123456",
+                "#ab123c",
+                "#AB123C",
+                "#abc",
+                "#faf",
+                "#AABBCC10",
+        };
+
+        const struct color results[] = {
+                { (double)0x12 / 0xff, (double)0x34 / 0xff, (double)0x56 / 0xff, 1.0},
+                { (double)0xab / 0xff, (double)0x12 / 0xff, (double)0x3c / 0xff, 1.0},
+                { (double)0xab / 0xff, (double)0x12 / 0xff, (double)0x3c / 0xff, 1.0},
+                { (double)0xaa / 0xff, (double)0xbb / 0xff, (double)0xcc / 0xff, 1.0},
+                { 1.0, (double)0xaa / 0xff, 1.0, 1.0},
+                { (double)0xaa / 0xff, (double)0xbb / 0xff, (double)0xcc / 0xff, (double)0x10 / 0xff},
+        };
+
+        ARRAY_SAME_LENGTH(inputs, results);
+
+        static char buf[100];
+        char buf1[10], buf2[10];
+
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu. Expected %s, got %s", i,
+                                color_to_string(results[i], buf1), color_to_string(val, buf2));
+                ASSERTm(buf, set_from_string(&val, s, inputs[i]));
+                ASSERTm(buf, COLOR_SAME(results[i], val));
+        }
+
+        PASS();
+}
+
+TEST test_string_to_color_invalid(void)
+{
+        struct color val = COLOR_UNINIT;
+        struct setting s;
+        s.type = TYPE_COLOR;
+        s.value = &val;
+        s.name = "test_color_invalid";
+
+        const char* inputs[] = {
+                "",
+                "not color",
+                "####",
+                "@#4x",
+                "#abx",
+                "#gg123c",
+                "#AB123C123212",
+                "#sjdsnc",
+                "#00#",
+                "#ab+cd",
+                "#fffffffffffffffff",
+                "   ##   ",
+                "#xzky",
+                "#abacgg",
+                "0xfaf",
+                "#fcb+fa",
+        };
+
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
+                ASSERT_FALSEm(buf, set_from_string(&val, s, inputs[i]));
+        }
+
+        ASSERTm("Color shouldn't changed from invalid inputs", !COLOR_VALID(val));
+        PASS();
+}
+
+TEST test_string_to_gradient(void)
+{
+        struct gradient *grad = NULL;
+        struct setting s;
+        s.type = TYPE_GRADIENT;
+        s.value = &grad;
+        s.name = "test_gradient";
+
+        const char* inputs[] = {
+                "#123456",
+                "#ab123c",
+                "#abc, #ebf, #aaafff",
+                "#abc123, #acaf8f",
+        };
+
+        // NOTE: Flexible array shenanigans
+        struct gradient *results[] = {
+                gradient_alloc(1),
+                gradient_alloc(1),
+                gradient_alloc(3),
+                gradient_alloc(2),
+        };
+
+        results[0]->colors[0] = (struct color) { (double)0x12 / 0xff, (double)0x34 / 0xff, (double)0x56 / 0xff, 1.0};
+
+        results[1]->colors[0] = (struct color) { (double)0xab / 0xff, (double)0x12 / 0xff, (double)0x3c / 0xff, 1.0};
+
+        results[2]->colors[0] = (struct color) { (double)0xaa / 0xff, (double)0xbb / 0xff, (double)0xcc / 0xff, 1.0};
+        results[2]->colors[1] = (struct color) { (double)0xee / 0xff, (double)0xbb / 0xff, (double)0xff / 0xff, 1.0};
+        results[2]->colors[2] = (struct color) { (double)0xaa / 0xff, (double)0xaf / 0xff, (double)0xff / 0xff, 1.0};
+
+        results[3]->colors[0] = (struct color) { (double)0xab / 0xff, (double)0xc1 / 0xff, (double)0x23 / 0xff, 1.0};
+        results[3]->colors[1] = (struct color) { (double)0xac / 0xff, (double)0xaf / 0xff, (double)0x8f / 0xff, 1.0};
+
+        ARRAY_SAME_LENGTH(inputs, results);
+
+        static char buf[100];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
+                ASSERTm(buf, set_from_string(&grad, s, inputs[i]));
+
+                char *t1 = gradient_to_string(results[i]);
+                char *t2 = gradient_to_string(grad);
+
+                sprintf(buf, "Failed in round %zu. Expected %s, got %s", i, t1, t2);
+
+                g_free(t1);
+                g_free(t2);
+
+                ASSERTm(buf, grad != NULL);
+                ASSERTm(buf, grad->length == results[i]->length);
+
+                for (size_t k = 0; k < grad->length; k++)
+                        ASSERTm(buf, COLOR_SAME(grad->colors[k], results[i]->colors[k]));
+
+                gradient_release(grad);
+                grad = NULL;
+        }
+
+        for (size_t i = 0; i < G_N_ELEMENTS(results); i++)
+                gradient_release(results[i]);
+
         PASS();
 }
 
@@ -651,34 +802,39 @@ TEST test_string_to_length(void)
 
         const char* inputs[] = {
                 "123",
+                "021",
                 "(123, 1234)",
+                "(-123, 1234)",
+                "(123, -1234)",
+                "(-123, -1234)",
                 "( , )",
                 "(234, )",
                 "(, 123)",
+                "(0, )",
         };
 
         const struct length results[] = {
                 { 123, 123 },
-                /* { 123, 123 }, */
+                { 21, 21 },
                 { 123, 1234 },
-                /* { -123, 1234 }, */
-                /* { -1234, 123 }, */
-                /* { -1234, -123 }, */
-                /* { -123, -1 }, */
-                { 0, INT_MAX },
+                { -123, 1234 },
+                { 123, -1234 },
+                { -123, -1234 },
+                { INT_MIN, INT_MAX },
                 { 234, INT_MAX },
-                { 0, 123 },
+                { INT_MIN, 123 },
+                { 0, INT_MAX },
         };
 
         ARRAY_SAME_LENGTH(inputs, results);
 
-        char buf[500];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i.", i);
+        static char buf[500];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu.", i);
                 ASSERTm(buf, set_from_string(&val, s, inputs[i]));
-                sprintf(buf, "Failed in round %i. Expected min to be %i, got %i", i, results[i].min, val.min);
+                sprintf(buf, "Failed in round %zu. Expected min to be %i, got %i", i, results[i].min, val.min);
                 ASSERT_EQm(buf, results[i].min, val.min);
-                sprintf(buf, "Failed in round %i. Expected max to be %i, got %i", i, results[i].max, val.max);
+                sprintf(buf, "Failed in round %zu. Expected max to be %i, got %i", i, results[i].max, val.max);
                 ASSERT_EQm(buf, results[i].max, val.max);
         }
 
@@ -706,24 +862,137 @@ TEST test_string_to_length_invalid(void)
                 "(456, 567",
                 "456, 567",
                 "456, 567)",
-                "-456",
-                "-1",
-                "(-123, 1234)", // Negative values
-                "(123, -1234)",
-                "(-123, -1234)",
-                "(-123, )",
-                "(123)",
-                "(123, 122)", // invalid order
+                "(-123, #1234)",
+                "(123,  # -1234)",
         };
 
-        char buf[50];
-        for (int i = 0; i < G_N_ELEMENTS(inputs); i++) {
-                sprintf(buf, "Failed in round %i.", i);
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
                 ASSERT_FALSEm(buf, set_from_string(&val, s, inputs[i]));
         }
 
         ASSERT_EQm("Length shouldn't change from invalid inputs", -123, val.min);
         ASSERT_EQm("Length shouldn't change from invalid inputs", -1234, val.max);
+        PASS();
+}
+
+TEST test_string_to_corners(void)
+{
+        enum corner_pos corners = C_NONE;
+
+        struct setting s;
+        s.type = TYPE_CUSTOM;
+        s.value = &corners;
+        s.parser = string_parse_corners;
+        s.parser_data = corners_enum_data;
+
+        static char buf[50];
+
+        // do not go until last element, since it's ENUM_END (all 0)
+        for (size_t i = 0; i < G_N_ELEMENTS(ellipsize_enum_data)-1; i++) {
+                sprintf(buf, "Failed in round %zu", i);
+                ASSERTm(buf, set_from_string(&corners, s, corners_enum_data[i].string));
+                ASSERT_EQm(buf, corners, corners_enum_data[i].enum_value);
+        }
+
+        const char* inputs[] = {
+                "bottom,right",
+                "top-left, top-right",
+                "all",
+                "right,left,top,bottom",
+                "bottom-left,top-right",
+                "all,all", // still accepted
+                "all,top-right",
+        };
+        const enum corner_pos results[] = {
+                C_BOT | C_RIGHT,
+                C_TOP_LEFT | C_TOP_RIGHT,
+                C_ALL,
+                C_ALL,
+                C_BOT_LEFT | C_TOP_RIGHT,
+                C_ALL,
+                C_ALL,
+        };
+
+        ARRAY_SAME_LENGTH(inputs, results);
+
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
+                ASSERTm(buf, set_from_string(&corners, s, inputs[i]));
+                ASSERT_EQm(buf, corners, results[i]);
+        }
+        PASS();
+}
+
+TEST test_string_to_corners_invalid(void)
+{
+        enum corner_pos corners = C_ALL + 1;
+
+        struct setting s = {0};
+        s.type = TYPE_CUSTOM;
+        s.parser = string_parse_corners;
+        s.parser_data = corners_enum_data;
+        s.value = &corners;
+        s.name = "test_corners";
+
+        const char* invalid_inputs[] = {
+                "123",
+                "something",
+                "else",
+                "al l",
+                "right;right",
+                "bot-left",
+                "top right, bottom left"
+        };
+
+        static char buf[50];
+        for (size_t i = 0; i < G_N_ELEMENTS(invalid_inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
+                bool success = set_from_string(&corners, s, invalid_inputs[i]);
+                ASSERT_FALSEm(buf, success);
+        }
+        ASSERT_EQm("Enum should not change from invalid values", corners, C_ALL + 1);
+        PASS();
+}
+
+TEST test_string_to_maybe_int(void)
+{
+        char *val = NULL;
+        int intval;
+        struct setting s;
+        s.type = TYPE_CUSTOM;
+        s.value = &val;
+        s.name = "test_maybe_int";
+        s.parser = string_parse_maybe_int;
+        s.parser_data = &intval;
+
+        const char* inputs[] = {
+                "0",
+                "1",
+                "HDMI-0",
+                "0TEST",
+        };
+
+        const struct { const char *s; int i; } results[] = {
+                { "0", 0 },
+                { "1", 1 },
+                { "HDMI-0", INT_MIN },
+                { "0TEST", INT_MIN },
+        };
+        static char buf[500];
+
+        for (size_t i = 0; i < G_N_ELEMENTS(inputs); i++) {
+                sprintf(buf, "Failed in round %zu", i);
+                ASSERTm(buf, set_from_string(&val, s, inputs[i]));
+                sprintf(buf, "Failed in round %zu. Expected val to be %s, got %s", i, results[i].s, val);
+                ASSERTm(buf, STR_EQ(val, results[i].s));
+                sprintf(buf, "Failed in round %zu. Expected intval to be %i, got %i", i, results[i].i, intval);
+                ASSERT_EQm(buf, results[i].i, intval);
+        }
+
+        g_free(val);
+
         PASS();
 }
 
@@ -743,6 +1012,7 @@ TEST test_enum_size(void)
         TEST_ENUM(enum follow_mode);
         TEST_ENUM(enum mouse_action );
         TEST_ENUM(enum zwlr_layer_shell_v1_layer);
+        TEST_ENUM(enum corner_pos);
         PASS();
 }
 
@@ -785,12 +1055,18 @@ SUITE(suite_option_parser)
         RUN_TEST(test_string_to_time);
         RUN_TEST(test_string_to_time_invalid);
         RUN_TEST(test_string_to_path);
+        RUN_TEST(test_string_to_corners);
+        RUN_TEST(test_string_to_corners_invalid);
         // Paths are now almost always considered valid
         RUN_TEST(test_string_to_sepcolor);
         RUN_TEST(test_string_to_sepcolor_invalid);
+        RUN_TEST(test_string_to_color);
+        RUN_TEST(test_string_to_color_invalid);
+        RUN_TEST(test_string_to_gradient);
         RUN_TEST(test_enum_size);
         RUN_TEST(test_string_to_length);
         RUN_TEST(test_string_to_length_invalid);
+        RUN_TEST(test_string_to_maybe_int);
 
         g_strfreev(argv);
 }

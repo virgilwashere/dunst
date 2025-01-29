@@ -103,10 +103,21 @@ void init_screens(void)
         }
 }
 
+void free_screen_ar(struct screen_info *scr, int len)
+{
+        if (!scr)
+                return;
+
+        for (int i = 0; i < len; ++i) {
+                XFree(scr[i].name);
+        }
+        g_free(scr);
+}
+
 void alloc_screen_ar(int n)
 {
         assert(n > 0);
-        g_free(screens);
+        free_screen_ar(screens, screens_len);
         screens = g_malloc0(n * sizeof(struct screen_info));
         screens_len = n;
 }
@@ -150,6 +161,7 @@ void randr_update(void)
         alloc_screen_ar(n);
 
         for (int i = 0; i < n; i++) {
+                screens[i].name = XGetAtomName(xctx.dpy, m[i].name);
                 screens[i].id = i;
                 screens[i].x = m[i].x;
                 screens[i].y = m[i].y;
@@ -157,6 +169,7 @@ void randr_update(void)
                 screens[i].h = m[i].height;
                 screens[i].mmh = m[i].mheight;
                 screens[i].dpi = screen_dpi_get(&screens[i]);
+                LOG_I("Detected screen %d (%s)", screens[i].id, screens[i].name);
         }
 
         XRRFreeMonitors(m);
@@ -193,6 +206,7 @@ void xinerama_update(void)
                 screens[i].y = info[i].y_org;
                 screens[i].h = info[i].height;
                 screens[i].w = info[i].width;
+                LOG_I("Detected screen %d", screens[i].id);
         }
         XFree(info);
 }
@@ -202,10 +216,12 @@ void screen_update_fallback(void)
         alloc_screen_ar(1);
 
         int screen;
-        if (settings.monitor >= 0)
-                screen = settings.monitor;
-        else
+        if (settings.monitor_num >= 0)
+                screen = settings.monitor_num;
+        else {
+                LOG_D("Ignoring settings.monitor '%s' in fallback mode", settings.monitor);
                 screen = DefaultScreen(xctx.dpy);
+        }
 
         screens[0].w = DisplayWidth(xctx.dpy, screen);
         screens[0].h = DisplayHeight(xctx.dpy, screen);
@@ -274,7 +290,7 @@ bool window_is_fullscreen(Window window)
         XSetErrorHandler(NULL);
 
         if (result == Success) {
-                for(int i = 0; i < n_items; i++) {
+                for(size_t i = 0; i < n_items; i++) {
                         Atom atom = ((Atom*) prop_to_return)[i];
                         if (!atom)
                                 continue;
@@ -297,6 +313,17 @@ bool window_is_fullscreen(Window window)
         return fs;
 }
 
+static int get_screen_by_name(const char *name, int defval)
+{
+        for (int i = 0; i < screens_len; ++i) {
+                if (g_strcmp0(screens[i].name, name) == 0) {
+                        return i;
+                }
+        }
+        LOG_D("Screen '%s' not found", name);
+        return defval;
+}
+
 /*
  * Select the screen on which the Window
  * should be displayed.
@@ -307,8 +334,10 @@ const struct screen_info *get_active_screen(void)
         bool force_follow_mouse = false;
 
         if (settings.f_mode == FOLLOW_NONE) {
-                if (settings.monitor >= 0 && settings.monitor < screens_len) {
-                        ret = settings.monitor;
+                if (settings.monitor_num >= 0 && settings.monitor_num < screens_len) {
+                        ret = settings.monitor_num;
+                } else {
+                        ret = get_screen_by_name(settings.monitor, 0);
                 }
                 goto sc_cleanup;
         } else {

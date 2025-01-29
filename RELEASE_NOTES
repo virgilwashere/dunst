@@ -1,4 +1,112 @@
 ===================================================================================
+Release Notes For v1.12.0
+===================================================================================
+
+There have been many important contributions in the last few months.
+Some notable changes are: adding hot-reload for the configuration, exporting
+rules via dunstctl, adding color gradients, removing default hard-coded icons.
+For detailed information consult the changelog.
+
+Important notice for all users:
+
+The behaviour of the setting `height` has been changed in a breaking way.
+Before you could specify a single value that would be used as the max height
+of a notification. In this release the dynamic height was implemented to make
+this settings behave more similarly to `width`.
+Now the values accepted are either a single number (for a *fixed height*) or
+a tuple of numbers (for a min/max range).
+
+The way of specifying a maximum height before was:
+    height = 300
+
+The equivalent way now is:
+    height = (0, 300)
+
+Furthermore the preferred syntax for the `offset` settings has been changed
+from NxN to (N,N). The old syntax is supported nevertheless.
+
+If you are a maintainer it would be helpful to include the message above when
+an user updates from an older version of dunst.
+
+Take a look at the changelog for all the bug fixes and improvements.
+
+===================================================================================
+Release Notes For v1.11.0
+===================================================================================
+
+This release hopefully marks the start of a new period of active development and
+contributions and a shift away from the previous lower maintenance mode.
+
+For users:
+
+This is the perfect time to engage with the project and other dunst users.
+Some of the features and changes to include in the v2 release are starting to
+be proposed or implemented. Everyone's opinion is important, so feel free
+to participate in the issues proposing new features (or redesigns of the old ones).
+
+This version mainly contains bug fixes and QoL improvements, and can be considered
+a preparatory release for the various things that will come in the future
+(overhaul of the rule syntax, multiple windows support, aesthetic and customization
+options, refactor of the drawing system, etc).
+
+For maintainers:
+
+X11 support is now optional and can be disabled in build by setting the `X11` make
+flag to 0. This means that you can offer Wayland-only builds.
+
+Shell completions are now considered official and can be installed/uninstalled from
+the Makefile. By default they are installed and can be disabled by setting the
+`COMPLETIONS` flag to 0.
+
+Take a look at the changelog for all the bug fixes and improvements.
+
+===================================================================================
+Release Notes For v1.10.0
+===================================================================================
+
+It's been a while since the last release. That does not mean that the
+development has been stagnant. There are some long requested features have been
+implemented, like a do not disturb mode in the form of multiple pause levels.
+You can specify the priority of notification and selectively pause them. The
+progress bar rendering for low progress values has been fixed, with preparation
+work being done for more progress bar customization.
+
+Since dunst gained Wayland support, Wayland received a lot of development.
+Dunst needed to do some catchup for that. A new Wayland idle protocol is
+implemented and support for Wayland touch screens and multi-seat has been
+added. It's now also possible to specify displays by their port name, instead
+of number.
+
+Take a look at the changelog for all the bug fixes and improvements.
+
+===================================================================================
+Release Notes For v1.9.2
+===================================================================================
+
+This release fixes two issues with high cpu usage one of which was introduced
+when trying to fix another cpu usage issue. So if you have experienced dunst
+making your fans spin harder than usual that should be fixed with this release.
+
+===================================================================================
+Release Notes For v1.9.1
+===================================================================================
+
+For users:
+
+If you like rounded corners, this release is for you. You can now add rounded
+corners to your progress bar and notification icons. Dunstctl added more
+options for changing the notification history, so I'm excited for what you can
+build with that. Dunst also is even more stable now with a crash being fixed
+and not using 100% of your cpu anymore in some situations.
+
+For maintainers:
+
+Libnotify and dunst are now optional to build by setting the `DUNSTIFY` make
+flag to 0. (enabled by default)
+
+Take a look at the changelog for a more detailed change description.
+
+===================================================================================
 Release Notes For v1.9.0
 ===================================================================================
 
@@ -312,7 +420,7 @@ PACKAGE MAINTAINERS:
     or close existing notifications.
 
     example:
-   id=$(dunstify -p "Replace" "this should get replaced after the sleep")
+    id=$(dunstify -p "Replace" "this should get replaced after the sleep")
     sleep 5
     dunstify -r $id "replacement"
 

@@ -22,19 +22,8 @@
 #include "utils.h"
 #include "icon-lookup.h"
 
-struct color {
-        double r;
-        double g;
-        double b;
-        double a;
-};
-
 struct colored_layout {
         PangoLayout *l;
-        struct color fg;
-        struct color bg;
-        struct color highlight;
-        struct color frame;
         char *text;
         PangoAttrList *attr;
         cairo_surface_t *icon;
@@ -47,9 +36,10 @@ window win;
 
 PangoFontDescription *pango_fdesc;
 
-#define UINT_MAX_N(bits) ((1 << bits) - 1)
+// NOTE: Saves some characters
+#define COLOR(cl, field) (cl)->n->colors.field
 
-void load_icon_themes()
+void load_icon_themes(void)
 {
         bool loaded_theme = false;
 
@@ -69,6 +59,91 @@ void load_icon_themes()
 
 }
 
+char *color_to_string(struct color c, char buf[10])
+{
+        if (!COLOR_VALID(c)) return NULL;
+
+        g_snprintf(buf, 10, "#%02x%02x%02x%02x",
+                        (int)(c.r * 255),
+                        (int)(c.g * 255),
+                        (int)(c.b * 255),
+                        (int)(c.a * 255));
+        return buf;
+}
+
+struct gradient *gradient_alloc(size_t length)
+{
+        if (length == 0)
+                return NULL;
+
+        struct gradient *grad = g_rc_box_alloc(sizeof(struct gradient) + length * sizeof(struct color));
+
+        grad->length = length;
+        grad->pattern = NULL;
+
+        return grad;
+}
+
+struct gradient *gradient_acquire(struct gradient *grad)
+{
+        return grad != NULL ? g_rc_box_acquire(grad) : NULL;
+}
+
+static void gradient_free(struct gradient *grad)
+{
+        if (grad->pattern)
+                cairo_pattern_destroy(grad->pattern);
+}
+
+void gradient_release(struct gradient *grad)
+{
+        if (grad != NULL)
+                g_rc_box_release_full(grad, (GDestroyNotify)gradient_free);
+}
+
+void gradient_pattern(struct gradient *grad)
+{
+        if (grad->length == 1) {
+                grad->pattern = cairo_pattern_create_rgba(grad->colors[0].r,
+                                                          grad->colors[0].g,
+                                                          grad->colors[0].b,
+                                                          grad->colors[0].a);
+        } else {
+                grad->pattern = cairo_pattern_create_linear(0, 0, 1, 0);
+                for (size_t i = 0; i < grad->length; i++) {
+                        double offset = i  / (double)(grad->length - 1);
+                        cairo_pattern_add_color_stop_rgba(grad->pattern,
+                                                          offset,
+                                                          grad->colors[i].r,
+                                                          grad->colors[i].g,
+                                                          grad->colors[i].b,
+                                                          grad->colors[i].a);
+                }
+        }
+}
+
+char *gradient_to_string(const struct gradient *grad)
+{
+        if (!GRADIENT_VALID(grad)) return NULL;
+
+        int max = grad->length * 11 + 1;
+        char *buf = g_malloc(max);
+
+        for (size_t i = 0, j = 0; i < grad->length; i++) {
+                j += g_snprintf(buf + j, max - j, "#%02x%02x%02x%02x",
+                                  (int)(grad->colors[i].r * 255),
+                                  (int)(grad->colors[i].g * 255),
+                                  (int)(grad->colors[i].b * 255),
+                                  (int)(grad->colors[i].a * 255));
+
+                if (i != grad->length - 1) {
+                        j += g_snprintf(buf + j, max - j, ", ");
+                }
+        }
+
+        return buf;
+}
+
 void draw_setup(void)
 {
         const struct output *out = output_create(settings.force_xwayland);
@@ -76,46 +151,12 @@ void draw_setup(void)
 
         win = out->win_create();
 
+        LOG_D("Trying to load font: '%s'", settings.font);
         pango_fdesc = pango_font_description_from_string(settings.font);
+        LOG_D("Loaded closest matching font: '%s'", pango_font_description_get_family(pango_fdesc));
 
         if (settings.enable_recursive_icon_lookup)
                 load_icon_themes();
-}
-
-static struct color hex_to_color(uint32_t hexValue, int dpc)
-{
-        const int bpc = 4 * dpc;
-        const unsigned single_max = UINT_MAX_N(bpc);
-
-        struct color ret;
-        ret.r = ((hexValue >> 3 * bpc) & single_max) / (double)single_max;
-        ret.g = ((hexValue >> 2 * bpc) & single_max) / (double)single_max;
-        ret.b = ((hexValue >> 1 * bpc) & single_max) / (double)single_max;
-        ret.a = ((hexValue)            & single_max) / (double)single_max;
-
-        return ret;
-}
-
-static struct color string_to_color(const char *str)
-{
-        if (STR_FULL(str)) {
-                char *end;
-                uint_fast32_t val = strtoul(str+1, &end, 16);
-                if (end[0] != '\0' && end[1] != '\0') {
-                        LOG_W("Invalid color string: '%s'", str);
-                }
-
-                switch (end - (str+1)) {
-                        case 3:  return hex_to_color((val << 4) | 0xF, 1);
-                        case 6:  return hex_to_color((val << 8) | 0xFF, 2);
-                        case 4:  return hex_to_color(val, 1);
-                        case 8:  return hex_to_color(val, 2);
-                }
-        }
-
-        /* return black on error */
-        LOG_W("Invalid color string: '%s'", str);
-        return hex_to_color(0xF, 1);
 }
 
 static inline double color_apply_delta(double base, double delta)
@@ -150,20 +191,17 @@ static struct color layout_get_sepcolor(struct colored_layout *cl,
                                         struct colored_layout *cl_next)
 {
         switch (settings.sep_color.type) {
-        case SEP_FRAME:
-                if (cl_next->n->urgency > cl->n->urgency)
-                        return cl_next->frame;
-                else
-                        return cl->frame;
-        case SEP_CUSTOM:
-                return string_to_color(settings.sep_color.sep_color);
-        case SEP_FOREGROUND:
-                return cl->fg;
-        case SEP_AUTO:
-                return calculate_foreground_color(cl->bg);
-        default:
-                LOG_E("Invalid %s enum value in %s:%d", "sep_color", __FILE__, __LINE__);
-                break;
+                case SEP_FRAME:
+                        return COLOR(cl_next->n->urgency > cl->n->urgency ? cl_next : cl, frame);
+                case SEP_CUSTOM:
+                        return settings.sep_color.color;
+                case SEP_FOREGROUND:
+                        return COLOR(cl, fg);
+                case SEP_AUTO:
+                        return calculate_foreground_color(COLOR(cl, bg));
+                default:
+                        LOG_E("Invalid %s enum value in %s:%d", "sep_color", __FILE__, __LINE__);
+                        break;
         }
 }
 
@@ -237,7 +275,7 @@ static void layout_setup(struct colored_layout *cl, int width, int height, doubl
         int icon_width = cl->icon ? get_icon_width(cl->icon, scale) + horizontal_padding : 0;
         int text_width = width - 2 * settings.h_padding - (cl->n->icon_position == ICON_TOP ? 0 : icon_width);
         int progress_bar_height = have_progress_bar(cl) ? settings.progress_bar_height + settings.padding : 0;
-        int max_text_height = MAX(0, settings.height - progress_bar_height - 2 * settings.padding);
+        int max_text_height = MAX(0, settings.height.max - progress_bar_height - 2 * settings.padding);
         layout_setup_pango(cl->l, text_width, max_text_height, cl->n->word_wrap, cl->n->ellipsize, cl->n->alignment);
 }
 
@@ -254,7 +292,7 @@ static void free_colored_layout(void *data)
 static struct dimensions calculate_notification_dimensions(struct colored_layout *cl, double scale)
 {
         struct dimensions dim = { 0 };
-        layout_setup(cl, settings.width.max, settings.height, scale);
+        layout_setup(cl, settings.width.max, settings.height.max, scale);
 
         int horizontal_padding = get_horizontal_text_icon_padding(cl->n);
         int icon_width = cl->icon? get_icon_width(cl->icon, scale) + horizontal_padding : 0;
@@ -277,14 +315,16 @@ static struct dimensions calculate_notification_dimensions(struct colored_layout
                 dim.h = MAX(icon_height, dim.text_height);
         }
 
-        dim.h += progress_bar_height;
+        dim.h += progress_bar_height + settings.padding * 2;
         dim.w = dim.text_width + icon_width + 2 * settings.h_padding;
 
-        dim.h = MIN(settings.height, dim.h + settings.padding * 2);
-        dim.w = MAX(settings.width.min, dim.w);
         if (have_progress_bar(cl))
                 dim.w = MAX(settings.progress_bar_min_width, dim.w);
 
+        dim.h = MAX(settings.height.min, dim.h);
+        dim.h = MIN(settings.height.max, dim.h);
+
+        dim.w = MAX(settings.width.min, dim.w);
         dim.w = MIN(settings.width.max, dim.w);
 
         cl->n->displayed_height = dim.h;
@@ -348,14 +388,14 @@ static struct colored_layout *layout_init_shared(cairo_t *c, struct notification
 {
         struct colored_layout *cl = g_malloc(sizeof(struct colored_layout));
         cl->l = layout_create(c);
-
-        cl->fg = string_to_color(n->colors.fg);
-        cl->bg = string_to_color(n->colors.bg);
-        cl->highlight = string_to_color(n->colors.highlight);
-        cl->frame = string_to_color(n->colors.frame);
         cl->is_xmore = false;
-
         cl->n = n;
+
+        // Invalid colors should never reach this point!
+        assert(settings.frame_width == 0 || COLOR_VALID(COLOR(cl, frame)));
+        assert(!have_progress_bar(cl) || COLOR(cl, highlight) != NULL);
+        assert(COLOR_VALID(COLOR(cl, fg)));
+        assert(COLOR_VALID(COLOR(cl, bg)));
         return cl;
 }
 
@@ -387,12 +427,14 @@ static struct colored_layout *layout_from_notification(cairo_t *c, struct notifi
 
         if (!err) {
                 pango_layout_set_text(cl->l, cl->text, -1);
+                pango_attr_list_insert(cl->attr, pango_attr_fallback_new(true));
                 pango_layout_set_attributes(cl->l, cl->attr);
         } else {
                 /* remove markup and display plain message instead */
                 n->text_to_render = markup_strip(n->text_to_render);
                 cl->text = NULL;
-                cl->attr = NULL;
+                cl->attr = pango_attr_list_new();
+                pango_attr_list_insert(cl->attr, pango_attr_fallback_new(true));
                 pango_layout_set_text(cl->l, n->text_to_render, -1);
                 if (n->first_render) {
                         LOG_W("Unable to parse markup: %s", err->message);
@@ -458,12 +500,9 @@ static int layout_get_height(struct colored_layout *cl, double scale)
                 h_progress_bar = settings.progress_bar_height + settings.padding;
         }
 
-
-        if (cl->n->icon_position == ICON_TOP && cl->n->icon) {
-                return h_icon + h_text + h_progress_bar + vertical_padding;
-        } else {
-                return MAX(h_text, h_icon) + h_progress_bar;
-        }
+        return (cl->n->icon_position == ICON_TOP && cl->n->icon)
+                ? h_icon + h_text + h_progress_bar + vertical_padding
+                : MAX(h_text, h_icon) + h_progress_bar;
 }
 
 /* Attempt to make internal radius more organic.
@@ -493,6 +532,14 @@ static int frame_internal_radius (int r, int w, int h)
 }
 
 /**
+ * A small wrapper around cairo_rectange for drawing a scaled rectangle.
+ */
+static inline void draw_rect(cairo_t *c, double x, double y, double width, double height, double scale)
+{
+        cairo_rectangle(c, round(x * scale), round(y * scale), round(width * scale), round(height * scale));
+}
+
+/**
  * Create a path on the given cairo context to draw the background of a notification.
  * The top corners will get rounded by `corner_radius`, if `first` is set.
  * Respectably the same for `last` with the bottom corners.
@@ -500,66 +547,156 @@ static int frame_internal_radius (int r, int w, int h)
  * TODO: Pass additional frame width information to fix blurry lines due to fractional scaling
  *       X and Y can then be calculated as:  x = round(x*scale) + half_frame_width
  */
-void draw_rounded_rect(cairo_t *c, float x, float y, int width, int height, int corner_radius, double scale, bool first, bool last)
+void draw_rounded_rect(cairo_t *c, float x, float y, int width, int height, int corner_radius, double scale, enum corner_pos corners)
 {
+        // Fast path for simple rects
+        if (corners == C_NONE || corner_radius <= 0) {
+                draw_rect(c, x, y, width, height, scale);
+                return;
+        }
+
         width = round(width * scale);
         height = round(height * scale);
         x *= scale;
         y *= scale;
         corner_radius = round(corner_radius * scale);
 
+        // Nothing valid to draw
+        if (width <= 0 || height <= 0 || scale <= 0)
+                return;
+
         const double degrees = M_PI / 180.0;
+
+        // This seems to be needed for a problem that occurs mostly when using cairo_stroke
+        // and not cairo_fill. Since the only case where we have partial angles is the progress
+        // bar and there we use fill, maybe this can be removed completely?
+        enum corner_pos skip = C_NONE;
+
+        float top_y_off = 0, bot_y_off = 0, top_x_off, bot_x_off;
+        top_x_off = bot_x_off = MAX(width - corner_radius, corner_radius);
+
+        double bot_left_angle1 = degrees * 90;
+        double bot_left_angle2 = degrees * 180;
+
+        double top_left_angle1 = degrees * 180;
+        double top_left_angle2 = degrees * 270;
+
+        double top_right_angle1 = degrees * 270;
+        double top_right_angle2 = degrees * 360;
+
+        double bot_right_angle1 = degrees * 0;
+        double bot_right_angle2 = degrees * 90;
+
+        // The trickiest cases to handle are when the width is less than corner_radius and corner_radius * 2,
+        // because we have to split the angle for the arc in the rounded corner
+        if (width <= corner_radius) {
+                double angle1 = 0, angle2 = 0;
+
+                // If there are two corners on the top/bottom they occupy half of the width
+                if ((corners & C_TOP) == C_TOP)
+                        angle1 = acos(1.0 - ((double)width / 2.0) / (double)corner_radius);
+                else
+                        angle1 = acos(1.0 - (double)width / (double)corner_radius);
+
+                if ((corners & C_BOT) == C_BOT)
+                        angle2 = acos(1.0 - ((double)width / 2.0) / (double)corner_radius);
+                else
+                        angle2 = acos(1.0 - (double)width / (double)corner_radius);
+
+                if ((corners & (C_TOP_RIGHT | C_BOT_LEFT)) == (C_TOP_RIGHT | C_BOT_LEFT) && !(corners & C_TOP_LEFT)) {
+                        top_y_off -= corner_radius * (1.0 - sin(angle1));
+                }
+
+                if ((corners & (C_TOP_LEFT | C_BOT_RIGHT)) == (C_TOP_LEFT | C_BOT_RIGHT) && !(corners & C_BOT_LEFT)) {
+                        bot_y_off = corner_radius * (1.0 - sin(angle2));
+                }
+
+                top_left_angle2 = degrees * 180 + angle1;
+                top_right_angle1 = degrees * 360 - angle1;
+                bot_left_angle1 = degrees * 180 - angle2;
+                bot_right_angle2 = angle2;
+
+                top_x_off = -(corner_radius - width);
+                bot_x_off = -(corner_radius - width);
+
+                if (corners != C_TOP && corners != C_BOT)
+                        skip = ~corners;
+
+        } else if (width <= corner_radius * 2 && (corners & C_LEFT && corners & C_RIGHT)) {
+                double angle1 = 0, angle2 = 0;
+                if (!(corners & C_TOP_LEFT) && corners & C_TOP_RIGHT)
+                        top_x_off = width - corner_radius;
+                else
+                        angle1 = acos((double)width / (double)corner_radius - 1.0);
+
+                if (!(corners & C_BOT_LEFT) && corners & C_BOT_RIGHT)
+                        bot_x_off = width - corner_radius;
+                else
+                        angle2 = acos((double)width / (double)corner_radius - 1.0);
+
+                top_right_angle2 = degrees * 360 - angle1;
+                bot_right_angle1 = angle2;
+        }
 
         cairo_new_sub_path(c);
 
-        if (last) {
-                // bottom right
-                cairo_arc(c,
-                          x + width - corner_radius,
-                          y + height - corner_radius,
-                          corner_radius,
-                          degrees * 0,
-                          degrees * 90);
-                // bottom left
-                cairo_arc(c,
-                          x + corner_radius,
-                          y + height - corner_radius,
-                          corner_radius,
-                          degrees * 90,
-                          degrees * 180);
-        } else {
-                cairo_line_to(c, x + width, y + height);
-                cairo_line_to(c, x,         y + height);
+        // bottom left
+        if (!(skip & C_BOT_LEFT)) {
+                if (corners & C_BOT_LEFT) {
+                        cairo_arc(c,
+                                  x + corner_radius,
+                                  y + height - corner_radius,
+                                  corner_radius,
+                                  bot_left_angle1,
+                                  bot_left_angle2);
+                } else {
+                        cairo_line_to(c, x, y + height);
+                }
         }
 
-        if (first) {
-                // top left
-                cairo_arc(c,
-                          x + corner_radius,
-                          y + corner_radius,
-                          corner_radius,
-                          degrees * 180,
-                          degrees * 270);
-                // top right
-                cairo_arc(c,
-                          x + width - corner_radius,
-                          y + corner_radius,
-                          corner_radius,
-                          degrees * 270,
-                          degrees * 360);
-        } else {
-                cairo_line_to(c, x,         y);
-                cairo_line_to(c, x + width, y);
+        // top left
+        if (!(skip & C_TOP_LEFT)) {
+                if (corners & C_TOP_LEFT) {
+                        cairo_arc(c,
+                                  x + corner_radius,
+                                  y + corner_radius,
+                                  corner_radius,
+                                  top_left_angle1,
+                                  top_left_angle2);
+                } else {
+                        cairo_line_to(c, x, y);
+                }
+        }
+
+        // top right
+        if (!(skip & C_TOP_RIGHT)) {
+                if (corners & C_TOP_RIGHT) {
+                        cairo_arc(c,
+                                  x + top_x_off,
+                                  y + corner_radius + top_y_off,
+                                  corner_radius,
+                                  top_right_angle1,
+                                  top_right_angle2);
+                } else {
+                        cairo_line_to(c, x + width, y);
+                }
+        }
+
+        // bottom right
+        if (!(skip & C_BOT_RIGHT)) {
+                if (corners & C_BOT_RIGHT) {
+                        cairo_arc(c,
+                                  x + bot_x_off,
+                                  y + height - corner_radius + bot_y_off,
+                                  corner_radius,
+                                  bot_right_angle1,
+                                  bot_right_angle2);
+                } else {
+                        cairo_line_to(c, x + width, y + height);
+                }
         }
 
         cairo_close_path(c);
-}
-
-/**
- * A small wrapper around cairo_rectange for drawing a scaled rectangle.
- */
-static void draw_rect(cairo_t *c, double x, double y, double width, double height, double scale) {
-        cairo_rectangle(c, round(x * scale), round(y * scale), round(width * scale), round(height * scale));
 }
 
 static cairo_surface_t *render_background(cairo_surface_t *srf,
@@ -569,8 +706,7 @@ static cairo_surface_t *render_background(cairo_surface_t *srf,
                                           int width,
                                           int height,
                                           int corner_radius,
-                                          bool first,
-                                          bool last,
+                                          enum corner_pos corners,
                                           int *ret_width,
                                           double scale)
 {
@@ -585,44 +721,44 @@ static cairo_surface_t *render_background(cairo_surface_t *srf,
         /* for correct combination of adjacent areas */
         cairo_set_operator(c, CAIRO_OPERATOR_ADD);
 
-        if (first)
+        if (corners & (C_TOP | _C_FIRST))
                 height += settings.frame_width;
-        if (last)
+        if (corners & (C_BOT | _C_LAST))
                 height += settings.frame_width;
         else
                 height += settings.separator_height;
 
-        draw_rounded_rect(c, x, y, width, height, corner_radius, scale, first, last);
+        draw_rounded_rect(c, x, y, width, height, corner_radius, scale, corners);
 
         /* adding frame */
         x += settings.frame_width;
-        if (first) {
+        if (corners & (C_TOP | _C_FIRST)) {
                 y += settings.frame_width;
                 height -= settings.frame_width;
         }
 
         width -= 2 * settings.frame_width;
 
-        if (last)
+        if (corners & (C_BOT | _C_LAST))
                 height -= settings.frame_width;
         else
                 height -= settings.separator_height;
 
         radius_int = frame_internal_radius(corner_radius, settings.frame_width, height);
 
-        draw_rounded_rect(c, x, y, width, height, radius_int, scale, first, last);
-        cairo_set_source_rgba(c, cl->frame.r, cl->frame.g, cl->frame.b, cl->frame.a);
+        draw_rounded_rect(c, x, y, width, height, radius_int, scale, corners);
+        cairo_set_source_rgba(c, COLOR(cl, frame.r), COLOR(cl, frame.g), COLOR(cl, frame.b), COLOR(cl, frame.a));
         cairo_fill(c);
 
-        draw_rounded_rect(c, x, y, width, height, radius_int, scale, first, last);
-        cairo_set_source_rgba(c, cl->bg.r, cl->bg.g, cl->bg.b, cl->bg.a);
+        draw_rounded_rect(c, x, y, width, height, radius_int, scale, corners);
+        cairo_set_source_rgba(c, COLOR(cl, bg.r), COLOR(cl, bg.g), COLOR(cl, bg.b), COLOR(cl, bg.a));
         cairo_fill(c);
 
         cairo_set_operator(c, CAIRO_OPERATOR_SOURCE);
 
         if (   settings.sep_color.type != SEP_FRAME
             && settings.separator_height > 0
-            && !last) {
+            && (corners & (C_BOT | _C_LAST)) == 0) {
                 struct color sep_color = layout_get_sepcolor(cl, cl_next);
                 cairo_set_source_rgba(c, sep_color.r, sep_color.g, sep_color.b, sep_color.a);
 
@@ -641,78 +777,87 @@ static cairo_surface_t *render_background(cairo_surface_t *srf,
                                                   round(width * scale), round(height * scale));
 }
 
-static void render_content(cairo_t *c, struct colored_layout *cl, int width, double scale)
+static void render_content(cairo_t *c, struct colored_layout *cl, int width, int height, double scale)
 {
         // Redo layout setup, while knowing the width. This is to make
         // alignment work correctly
-        layout_setup(cl, width, settings.height, scale);
+        layout_setup(cl, width, height, scale);
 
-        const int h = layout_get_height(cl, scale);
-        LOG_D("Layout height %i", h);
-        int h_without_progress_bar = h;
+        // NOTE: Includes paddings!
+        int h_without_progress_bar = height;
         if (have_progress_bar(cl)) {
-                 h_without_progress_bar -= settings.progress_bar_height + settings.padding;
+                h_without_progress_bar -= settings.progress_bar_height + settings.padding;
         }
 
+        int text_h = 0;
         if (!cl->n->hide_text) {
-                int h_text = 0;
-                get_text_size(cl->l, NULL, &h_text, scale);
-
-                int text_x = settings.h_padding,
-                    text_y = settings.padding + h_without_progress_bar / 2 - h_text / 2;
-
-                // text positioning
-                if (cl->icon) {
-                        // vertical alignment
-                        if (settings.vertical_alignment == VERTICAL_TOP) {
-                                text_y = settings.padding;
-                        } else if (settings.vertical_alignment == VERTICAL_BOTTOM) {
-                                text_y = h_without_progress_bar + settings.padding - h_text;
-                                if (text_y < 0)
-                                        text_y = settings.padding;
-                        } // else VERTICAL_CENTER
-
-                        // icon position
-                        if (cl->n->icon_position == ICON_LEFT) {
-                                text_x = get_icon_width(cl->icon, scale) + settings.h_padding + get_horizontal_text_icon_padding(cl->n);
-                        } else if (cl->n->icon_position == ICON_TOP) {
-                                text_y = get_icon_height(cl->icon, scale) + settings.padding + get_vertical_text_icon_padding(cl->n);
-                        } // else ICON_RIGHT
-                }
-                cairo_move_to(c, round(text_x * scale), round(text_y * scale));
-
-                cairo_set_source_rgba(c, cl->fg.r, cl->fg.g, cl->fg.b, cl->fg.a);
-                pango_cairo_update_layout(c, cl->l);
-                pango_cairo_show_layout(c, cl->l);
+                get_text_size(cl->l, NULL, &text_h, scale);
         }
+
+        // text vertical alignment
+        int text_x = settings.h_padding,
+            text_y = settings.padding;
+
+        if (settings.vertical_alignment == VERTICAL_CENTER) {
+                text_y = h_without_progress_bar / 2 - text_h / 2;
+        } else if (settings.vertical_alignment == VERTICAL_BOTTOM) {
+                text_y = h_without_progress_bar - settings.padding - text_h;
+                if (text_y < 0) text_y = settings.padding;
+        } // else VERTICAL_TOP
 
         // icon positioning
-        if (cl->icon) {
-                unsigned int image_width = get_icon_width(cl->icon, scale),
-                             image_height = get_icon_height(cl->icon, scale),
-                             image_x = width - settings.h_padding - image_width,
-                             image_y = settings.padding + h_without_progress_bar/2 - image_height/2;
+        if (cl->icon && cl->n->icon_position != ICON_OFF) {
+                int image_width = get_icon_width(cl->icon, scale),
+                    image_height = get_icon_height(cl->icon, scale),
+                    image_x = width - settings.h_padding - image_width,
+                    image_y = text_y,
+                    v_padding = get_vertical_text_icon_padding(cl->n);
 
                 // vertical alignment
-                if (settings.vertical_alignment == VERTICAL_TOP) {
-                        image_y = settings.padding;
-                } else if (settings.vertical_alignment == VERTICAL_BOTTOM) {
-                        image_y = h_without_progress_bar + settings.padding - image_height;
-                        if (image_y < settings.padding || image_y > h_without_progress_bar)
-                                image_y = settings.padding;
-                } // else VERTICAL_CENTER
+                switch (settings.vertical_alignment) {
+                        case VERTICAL_TOP:
+                                if (cl->n->icon_position == ICON_TOP) {
+                                        // Shift text downward
+                                        text_y += image_height + v_padding;
+                                }
+                                break;
+                        case VERTICAL_CENTER:
+                                if (cl->n->icon_position == ICON_TOP) {
+                                        // Adjust text and image by half
+                                        image_y -= (image_height + v_padding) / 2;
+                                        text_y += (image_height + v_padding) / 2;
+                                } else {
+                                        image_y += text_h / 2 - image_height / 2;
+                                }
+                                break;
+                        case VERTICAL_BOTTOM:
+                                if (cl->n->icon_position == ICON_TOP) {
+                                        image_y -= image_height + v_padding;
+                                } else {
+                                        image_y -= image_height - text_h;
+                                }
+                                break;
+                }
 
                 // icon position
-                if (cl->n->icon_position == ICON_LEFT) {
+                if (cl->n->icon_position == ICON_TOP) {
+                        image_x = (width - image_width) / 2;
+                } else if (cl->n->icon_position == ICON_LEFT) {
                         image_x = settings.h_padding;
-                } else if (cl->n->icon_position == ICON_TOP) {
-                        image_y = settings.padding;
-                        image_x = width/2 - image_width/2;
+                        text_x += image_width + get_horizontal_text_icon_padding(cl->n);
                 } // else ICON_RIGHT
 
                 cairo_set_source_surface(c, cl->icon, round(image_x * scale), round(image_y * scale));
-                draw_rounded_rect(c, image_x, image_y, image_width, image_height, settings.icon_corner_radius, scale, true, true);
+                draw_rounded_rect(c, image_x, image_y, image_width, image_height, settings.icon_corner_radius, scale, settings.icon_corners);
                 cairo_fill(c);
+        }
+
+        // text positioning
+        if (!cl->n->hide_text) {
+                cairo_move_to(c, round(text_x * scale), round(text_y * scale));
+                cairo_set_source_rgba(c, COLOR(cl, fg.r), COLOR(cl, fg.g), COLOR(cl, fg.b), COLOR(cl, fg.a));
+                pango_cairo_update_layout(c, cl->l);
+                pango_cairo_show_layout(c, cl->l);
         }
 
         // progress bar positioning
@@ -722,10 +867,10 @@ static void render_content(cairo_t *c, struct colored_layout *cl, int width, dou
                 unsigned int frame_width = settings.progress_bar_frame_width,
                              progress_width = MIN(width - 2 * settings.h_padding, settings.progress_bar_max_width),
                              progress_height = settings.progress_bar_height - frame_width,
-                             frame_y = settings.padding + h - settings.progress_bar_height,
+                             frame_y = h_without_progress_bar,
                              progress_width_without_frame = progress_width - 2 * frame_width,
                              progress_width_1 = progress_width_without_frame * progress / 100,
-                             progress_width_2 = progress_width_without_frame - progress_width_1;
+                             progress_width_2 = progress_width_without_frame - 1;
 
                 switch (cl->n->progress_bar_alignment) {
                         case PANGO_ALIGN_LEFT:
@@ -739,36 +884,42 @@ static void render_content(cairo_t *c, struct colored_layout *cl, int width, dou
                              break;
                 }
                 unsigned int x_bar_1 = frame_x + frame_width,
-                             x_bar_2 = x_bar_1 + progress_width_1;
+                             x_bar_2 = x_bar_1 + 0.5;
 
-                double half_frame_width = frame_width / 2.0;
+                double half_frame_width = (double)frame_width / 2.0;
 
                 /* Draw progress bar
-                * TODO: Modify draw_rounde_rect to fix blurry lines due to fractional scaling
-                * Note: the bar could be drawn a bit smaller, because the frame is drawn on top 
+                * TODO: Modify draw_rounded_rect to fix blurry lines due to fractional scaling
+                * Note: for now the bar background is drawn a little bit smaller than the fill, however
+                *       this solution is not particularly solid (basically subracting a pixel or two)
                 */
-                // left side (fill)
-                cairo_set_source_rgba(c, cl->highlight.r, cl->highlight.g, cl->highlight.b, cl->highlight.a);
-                draw_rounded_rect(c, x_bar_1, frame_y, progress_width_1, progress_height, 
-                        settings.progress_bar_corner_radius, scale, true, true);
-                cairo_fill(c);
-                // right side (background)
-                cairo_set_source_rgba(c, cl->bg.r, cl->bg.g, cl->bg.b, cl->bg.a);
-                draw_rounded_rect(c, x_bar_2, frame_y, progress_width_2, progress_height, 
-                        settings.progress_bar_corner_radius, scale, true, true);
 
+                // back layer (background)
+                cairo_set_source_rgba(c, COLOR(cl, bg.r), COLOR(cl, bg.g), COLOR(cl, bg.b), COLOR(cl, bg.a));
+                draw_rounded_rect(c, x_bar_2, frame_y, progress_width_2, progress_height,
+                        settings.progress_bar_corner_radius, scale, settings.progress_bar_corners);
+                cairo_fill(c);
+
+                // top layer (fill)
+                cairo_matrix_t matrix;
+                cairo_matrix_init_scale(&matrix, 1.0 / width, 1.0);
+                cairo_pattern_set_matrix(COLOR(cl, highlight->pattern), &matrix);
+                cairo_set_source(c, COLOR(cl, highlight->pattern));
+
+                draw_rounded_rect(c, x_bar_1, frame_y, progress_width_1, progress_height,
+                        settings.progress_bar_corner_radius, scale, settings.progress_bar_corners);
                 cairo_fill(c);
 
                 // border
-                cairo_set_source_rgba(c, cl->frame.r, cl->frame.g, cl->frame.b, cl->frame.a);
+                cairo_set_source_rgba(c, COLOR(cl, frame.r), COLOR(cl, frame.g), COLOR(cl, frame.b), COLOR(cl, frame.a));
                 cairo_set_line_width(c, frame_width * scale);
                 draw_rounded_rect(c,
-                                frame_x + half_frame_width,
-                                frame_y + half_frame_width,
-                                progress_width - frame_width,
+                                frame_x + half_frame_width + 1,
+                                frame_y,
+                                progress_width - frame_width - 2,
                                 progress_height,
                                 settings.progress_bar_corner_radius,
-                                scale, true, true);
+                                scale, settings.progress_bar_corners);
                 cairo_stroke(c);
         }
 }
@@ -777,34 +928,28 @@ static struct dimensions layout_render(cairo_surface_t *srf,
                                        struct colored_layout *cl,
                                        struct colored_layout *cl_next,
                                        struct dimensions dim,
-                                       bool first,
-                                       bool last)
+                                       enum corner_pos corners)
 {
         double scale = output->get_scale();
         const int cl_h = layout_get_height(cl, scale);
 
-        int h_text = 0;
-        get_text_size(cl->l, NULL, &h_text, scale);
-
         int bg_width = 0;
-        int bg_height = MIN(settings.height, (2 * settings.padding) + cl_h);
+        int bg_height = MAX(settings.height.min, 2 * settings.padding + cl_h);
+        bg_height = MIN(settings.height.max, bg_height);
 
-        cairo_surface_t *content = render_background(srf, cl, cl_next, dim.y, dim.w, bg_height, dim.corner_radius, first, last, &bg_width, scale);
+        cairo_surface_t *content = render_background(srf, cl, cl_next, dim.y, dim.w, bg_height, dim.corner_radius, corners, &bg_width, scale);
         cairo_t *c = cairo_create(content);
 
-        render_content(c, cl, bg_width, scale);
+        render_content(c, cl, bg_width, bg_height, scale);
 
         /* adding frame */
-        if (first)
+        if (corners & (C_TOP | _C_FIRST))
                 dim.y += settings.frame_width;
 
-        if (last)
+        if (corners & (C_BOT | _C_LAST))
                 dim.y += settings.frame_width;
 
-        if ((2 * settings.padding + cl_h) < settings.height)
-                dim.y += cl_h + 2 * settings.padding;
-        else
-                dim.y += settings.height;
+        dim.y += bg_height;
 
         if (settings.gap_size)
                 dim.y += settings.gap_size;
@@ -870,7 +1015,13 @@ void draw(void)
 {
         assert(queues_length_displayed() > 0);
 
-        GSList *layouts = create_layouts(output->win_get_context(win));
+        cairo_t *c = output->win_get_context(win);
+
+        if (c == NULL) {
+                return;
+        }
+
+        GSList *layouts = create_layouts(c);
 
         struct dimensions dim = calculate_dimensions(layouts);
         LOG_D("Window dimensions %ix%i", dim.w, dim.h);
@@ -880,22 +1031,19 @@ void draw(void)
                                                                     round(dim.w * scale),
                                                                     round(dim.h * scale));
 
-        bool first = true;
-        bool last;
+        enum corner_pos corners = (settings.corners & C_TOP) | _C_FIRST;
         for (GSList *iter = layouts; iter; iter = iter->next) {
 
                 struct colored_layout *cl_this = iter->data;
                 struct colored_layout *cl_next = iter->next ? iter->next->data : NULL;
-                last = !cl_next;
 
-                if (settings.gap_size) {
-                        first = true;
-                        last = true;
-                }
+                if (settings.gap_size)
+                        corners = settings.corners;
+                else if (!cl_next)
+                        corners |= (settings.corners & C_BOT) | _C_LAST;
 
-                dim = layout_render(image_surface, cl_this, cl_next, dim, first, last);
-
-                first = false;
+                dim = layout_render(image_surface, cl_this, cl_next, dim, corners);
+                corners &= ~(C_TOP | _C_FIRST);
         }
 
         output->display_surface(image_surface, win, &dim);
@@ -906,6 +1054,7 @@ void draw(void)
 
 void draw_deinit(void)
 {
+        pango_font_description_free(pango_fdesc);
         output->win_destroy(win);
         output->deinit();
         if (settings.enable_recursive_icon_lookup)

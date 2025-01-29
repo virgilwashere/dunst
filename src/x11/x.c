@@ -19,7 +19,14 @@
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <linux/input-event-codes.h>
+#else
+#define BTN_LEFT    (0x110)
+#define BTN_RIGHT   (0x111)
+#define BTN_MIDDLE  (0x112)
+#define BTN_TOUCH   (0x14a)
+#endif
 
 #include "../dbus.h"
 #include "../draw.h"
@@ -114,7 +121,7 @@ static void x_win_corners_shape(struct window_x11 *win, const int rad)
         draw_rounded_rect(cr, 0, 0,
                           width, height,
                           rad, 1,
-                          true, true);
+                          settings.corners);
         cairo_fill(cr);
 
         cairo_show_page(cr);
@@ -361,6 +368,7 @@ gboolean x_mainloop_fd_dispatch(GSource *source, GSourceFunc callback, gpointer 
                         }
                         /* Explicitly fallthrough. Other PropertyNotify events, e.g. catching
                          * _NET_WM get handled in the Focus(In|Out) section */
+                        /* fall through */
                 case ConfigureNotify:
                 case FocusIn:
                 case FocusOut:
@@ -488,6 +496,13 @@ static void XRM_update_db(void)
                         db = XrmGetDatabase(xctx.dpy);
                         XrmDestroyDatabase(db);
                 }
+
+                // Despite what the XrmSetDatabase docs say, it may try to free
+                // the database, resulting in memory corruption. Prevent that
+                // by making sure it has no db to act on. If it's past the
+                // first run, we will have done XrmDestroyDatabase above
+                // anyway.
+                xctx.dpy->db = NULL;
 
                 db = XrmGetStringDatabase((const char*)prop.value);
                 XrmSetDatabase(xctx.dpy, db);

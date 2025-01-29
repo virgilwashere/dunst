@@ -11,6 +11,7 @@ static gchar *summary = NULL;
 static gchar *body = NULL;
 static NotifyUrgency urgency = NOTIFY_URGENCY_NORMAL;
 static gchar *urgency_str = NULL;
+static gchar *category = NULL;
 static gchar **hint_strs = NULL;
 static gchar **action_strs = NULL;
 static gint timeout = NOTIFY_EXPIRES_DEFAULT;
@@ -30,9 +31,10 @@ static GOptionEntry entries[] =
     { "hints",        'h', 0, G_OPTION_ARG_STRING_ARRAY, &hint_strs,      "User specified hints", "HINT" },
     { "action",       'A', 0, G_OPTION_ARG_STRING_ARRAY, &action_strs,    "Actions the user can invoke", "ACTION" },
     { "timeout",      't', 0, G_OPTION_ARG_INT,          &timeout,        "The time in milliseconds until the notification expires", "TIMEOUT" },
-    { "icon",         'i', 0, G_OPTION_ARG_STRING,       &icon,           "An Icon that should be displayed with the notification", "ICON" },
+    { "icon",         'i', 0, G_OPTION_ARG_STRING,       &icon,           "An icon that should be displayed with the notification", "ICON" },
     { "raw_icon",     'I', 0, G_OPTION_ARG_STRING,       &raw_icon_path,  "Path to the icon to be sent as raw image data", "RAW_ICON"},
-    { "capabilities", 'c', 0, G_OPTION_ARG_NONE,         &capabilities,   "Print the server capabilities and exit", NULL},
+    { "category",     'c', 0, G_OPTION_ARG_STRING,       &category,       "The category of this notification", "TYPE" },
+    { "capabilities", 0,   0, G_OPTION_ARG_NONE,         &capabilities,   "Print the server capabilities and exit", NULL},
     { "serverinfo",   's', 0, G_OPTION_ARG_NONE,         &serverinfo,     "Print server information and exit", NULL},
     { "printid",      'p', 0, G_OPTION_ARG_NONE,         &printid,        "Print id, which can be used to update/replace this notification", NULL},
     { "replace",      'r', 0, G_OPTION_ARG_INT,          &replace_id,     "Set id of this notification.", "ID"},
@@ -108,7 +110,7 @@ void parse_commandline(int argc, char *argv[])
     GError *error = NULL;
     GOptionContext *context;
 
-    context = g_option_context_new("- Dunstify");
+    context = g_option_context_new("SUMMARY [BODY]");
     g_option_context_add_main_entries(context, entries, NULL);
     if (!g_option_context_parse(context, &argc, &argv, &error)){
         g_printerr("Invalid commandline: %s\n", error->message);
@@ -212,7 +214,7 @@ void put_id(NotifyNotification *n, guint32 id)
 {
     knickers *kn = n->priv;
 
-    /* And know I'm putting stuff into
+    /* And now I'm putting stuff into
      * your knickers. I'm sorry.
      * I'm so sorry.
      * */
@@ -301,6 +303,9 @@ int main(int argc, char *argv[])
     n = notify_notification_new(summary, body, icon);
     notify_notification_set_timeout(n, timeout);
     notify_notification_set_urgency(n, urgency);
+
+    if (category != NULL)
+        notify_notification_set_category(n, category);
 
     GError *err = NULL;
 

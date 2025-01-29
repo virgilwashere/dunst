@@ -17,12 +17,23 @@
 #define STRN_EQ(a, b, n) (strncmp(a, b, n) == 0)
 //! Test if string a and b are the same case-insensitively
 #define STR_CASEQ(a, b) (strcasecmp(a, b) == 0)
+//! Get a non null string from a possibly null one
+#define STR_NN(s) (s == NULL ? "(null)" : s)
+
+//! Stringify the given expression or macro
+#define STR_TO(...) _STR_TO(__VA_ARGS__)
+#define _STR_TO(...) "" # __VA_ARGS__
+
+//! Make a gboolean from a boolean value
+// See https://github.com/dunst-project/dunst/issues/1421
+#define BOOL2G(x) ((x) ? TRUE : FALSE)
 
 //! Assert that expr evaluates to true, if not return with val
 #define ASSERT_OR_RET(expr, val) if (!(expr)) return val;
 
 //! Convert a second into the internal time representation
-#define S2US(s) (((gint64)(s)) * 1000 * 1000)
+#define S2US(s) (((gint64)(s)) * G_USEC_PER_SEC)
+#define US2S(s) (((gint64)(s)) / G_USEC_PER_SEC)
 
 /**
  * Replaces all occurrences of the char \p needle with the char \p replacement in \p haystack.
@@ -245,5 +256,8 @@ FILE * fopen_verbose(const char * const path);
  * when the environment variable doesn't exits.
  */
 void add_paths_from_env(GPtrArray *arr, char *env_name, char *subdir, char *alternative);
+
+bool string_is_int(const char *str);
+
 #endif
 /* vim: set ft=c tabstop=8 shiftwidth=8 expandtab textwidth=0: */

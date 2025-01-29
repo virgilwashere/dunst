@@ -7,7 +7,7 @@
 extern const char *base;
 #define ICONPREFIX "data", "icons"
 
-int setup_test_theme(){
+int setup_test_theme(void) {
         char *theme_path = g_build_filename(base, ICONPREFIX,  NULL);
         int theme_index = load_icon_theme_from_dir(theme_path, "theme");
         add_default_theme(theme_index);
@@ -17,15 +17,6 @@ int setup_test_theme(){
 
 #define find_icon_test(iconname, size, ...) { \
         char *icon = find_icon_path(iconname, size); \
-        char *expected = g_build_filename(base, ICONPREFIX, "theme", __VA_ARGS__, NULL); \
-        ASSERTm("Could not find icon", icon); \
-        ASSERT_STR_EQ(expected, icon); \
-        g_free(expected); \
-        g_free(icon); \
-}
-
-#define find_path_test(path, ...) { \
-        char *icon = find_icon_path(path, 42); /* size doesn't matter */ \
         char *expected = g_build_filename(base, ICONPREFIX, "theme", __VA_ARGS__, NULL); \
         ASSERTm("Could not find icon", icon); \
         ASSERT_STR_EQ(expected, icon); \
@@ -55,33 +46,20 @@ TEST test_find_icon(void)
         PASS();
 }
 
-TEST test_find_path(void)
-{
-        setup_test_theme();
-        char *path = g_build_filename(base, ICONPREFIX, "theme", "16x16", "actions", "edit.png", NULL);
-        find_path_test(path, "16x16", "actions", "edit.png");
-        char *path2 = g_strconcat("file://", path, NULL);
-        find_path_test(path2, "16x16", "actions", "edit.png");
-        g_free(path2);
-        g_free(path);
-        free_all_themes();
-        PASS();
-}
-
-
 TEST test_new_icon_overrides_raw_icon(void) {
         setup_test_theme();
 
         struct notification *n = test_notification_with_icon("new_icon", 10);
-        struct rule *rule = malloc(sizeof(struct rule));
+        struct rule *rule = g_malloc(sizeof(struct rule));
         *rule = empty_rule;
         rule->summary = g_strdup("new_icon");
         rule->new_icon = g_strdup("edit");
 
         ASSERT(n->icon);
-
         int old_width = cairo_image_surface_get_width(n->icon);
-        rule_apply(rule, n);
+        rule_apply(rule, n, true);
+
+        ASSERT(n->icon);
         ASSERT(old_width != cairo_image_surface_get_width(n->icon));
 
         cairo_surface_destroy(n->icon);
@@ -167,7 +145,6 @@ SUITE (suite_icon_lookup)
 {
         RUN_TEST(test_load_theme_from_dir);
         RUN_TEST(test_find_icon);
-        RUN_TEST(test_find_path);
         RUN_TEST(test_new_icon_overrides_raw_icon);
         bool bench = false;
         if (bench) {

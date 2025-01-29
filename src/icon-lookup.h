@@ -57,7 +57,7 @@ void add_default_theme(int theme_index);
  * @retval NULL if the icon cannot be found or is not readable.
  */
 char *find_icon_in_theme(const char *name, int theme_index, int size);
-char *find_icon_path(const char *name, int size);
+
 void set_default_theme(int theme_index);
 
 /**
@@ -76,7 +76,7 @@ char *find_icon_path(const char *name, int size);
 /**
  * Free all icon themes.
  */
-void free_all_themes();
+void free_all_themes(void);
 
 #endif
 /* vim: set ft=c tabstop=8 shiftwidth=8 expandtab textwidth=0: */

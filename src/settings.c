@@ -20,7 +20,6 @@
 #include "ini.h"
 #include "rules.h"
 #include "utils.h"
-#include "x11/x.h"
 #include "output.h"
 
 #ifndef SYSCONFDIR
@@ -33,6 +32,7 @@
 #endif
 
 struct settings settings;
+bool print_notifications = false;
 
 /** @brief Filter for scandir().
  *
@@ -60,7 +60,7 @@ static int is_drop_in(const struct dirent *dent) {
  * The result @e must @e not be freed! The array is cached in a static variable,
  * so it is OK to call this again instead of caching its return value.
  */
-static GPtrArray *get_xdg_conf_basedirs() {
+static GPtrArray *get_xdg_conf_basedirs(void) {
         GPtrArray *arr = g_ptr_array_new_full(4, g_free);
         g_ptr_array_add(arr, g_build_filename(g_get_user_config_dir(), "dunst", NULL));
 
@@ -88,6 +88,7 @@ static void config_files_add_drop_ins(GPtrArray *config_files, const char *path)
 
         if (n == -1) {
                 // Scandir error. Most likely the directory doesn't exist.
+                g_free(drop_in_dir);
                 return;
         }
 
@@ -96,9 +97,11 @@ static void config_files_add_drop_ins(GPtrArray *config_files, const char *path)
                                 drop_ins[n]->d_name, NULL);
                 LOG_D("Found drop-in: %s\n", drop_in);
                 g_ptr_array_insert(config_files, insert_index, drop_in);
-                free(drop_ins[n]);
+                g_free(drop_ins[n]);
         }
-        free(drop_ins);
+
+        g_free(drop_in_dir);
+        g_free(drop_ins);
 }
 
 /** @brief Find all config files.
@@ -107,21 +110,12 @@ static void config_files_add_drop_ins(GPtrArray *config_files, const char *path)
  * drop-ins and puts their locations in a GPtrArray, @e most important last.
  *
  * The returned GPtrArray and it's elements are owned by the caller.
- *
- * @param path The config path that overrides the default config path. No
- * drop-in files or other configs are searched.
  */
-static GPtrArray* get_conf_files(const char *path) {
-        if (path) {
-                GPtrArray *result = g_ptr_array_new_full(1, g_free);
-                g_ptr_array_add(result, g_strdup(path));
-                return result;
-        }
-
+static GPtrArray* get_conf_files(void) {
         GPtrArray *config_locations = get_xdg_conf_basedirs();
         GPtrArray *config_files = g_ptr_array_new_full(3, g_free);
         char *dunstrc_location = NULL;
-        for (int i = 0; i < config_locations->len; i++) {
+        for (size_t i = 0; i < config_locations->len; i++) {
                 dunstrc_location = g_build_filename(config_locations->pdata[i],
                                 "dunstrc", NULL);
                 LOG_D("Trying config location: %s", dunstrc_location);
@@ -140,33 +134,15 @@ static GPtrArray* get_conf_files(const char *path) {
 FILE *fopen_conf(char * const path)
 {
         FILE *f = NULL;
-        char *real_path = string_to_path(strdup(path));
+        char *real_path = string_to_path(g_strdup(path));
 
-        if (is_readable_file(real_path) && (f = fopen(real_path, "r")))
+        if (is_readable_file(real_path) && NULL != (f = fopen(real_path, "r")))
                 LOG_I(MSG_FOPEN_SUCCESS(path, f));
         else
                 LOG_W(MSG_FOPEN_FAILURE(path));
 
-        free(real_path);
+        g_free(real_path);
         return f;
-}
-
-void settings_init() {
-        static bool init_done = false;
-        if (!init_done) {
-                LOG_D("Initializing settings");
-                settings = (struct settings) {0};
-
-                init_done = true;
-        }
-}
-
-void print_rule(struct rule* r) {
-        LOG_D("Rule %s", r->name);
-        LOG_D("summary %s", r->summary);
-        LOG_D("appname %s", r->appname);
-        LOG_D("script %s", r->script);
-        LOG_D("frame %s", r->fc);
 }
 
 void check_and_correct_settings(struct settings *s) {
@@ -199,14 +175,39 @@ void check_and_correct_settings(struct settings *s) {
                         DIE("setting progress_bar_max_width is smaller than progress_bar_min_width");
                 }
                 if (s->progress_bar_min_width > s->width.max) {
-                        LOG_W("Progress bar min width is greater than the max width of the notification.");
+                        LOG_W("Progress bar min width is greater than the max width of the notification");
                 }
                 int progress_bar_max_corner_radius = (s->progress_bar_height / 2);
                 if (s->progress_bar_corner_radius > progress_bar_max_corner_radius) {
                         settings.progress_bar_corner_radius = progress_bar_max_corner_radius;
-                        LOG_W("Progress bar corner radius clamped to half of progress bar height (%i).",
+                        LOG_W("Progress bar corner radius clamped to half of progress bar height (%i)",
                                 progress_bar_max_corner_radius);
                 }
+        }
+
+        // check lengths
+        if (s->width.min == INT_MIN) {
+                s->width.min = 0;
+        }
+        if (s->width.min < 0 || s->width.max < 0) {
+                DIE("setting width does not support negative values");
+        }
+        if (s->width.min > s->width.max) {
+                DIE("setting width min (%i) is always greather than max (%i)", s->width.min, s->width.max);
+        }
+
+        if (s->height.min == INT_MIN) {
+                s->height.min = 0;
+        }
+        if (s->height.min < 0 || s->height.max < 0) {
+                DIE("setting height does not support negative values");
+        }
+        if (s->height.min > s->height.max) {
+                DIE("setting height min (%i) is always greather than max (%i)", s->height.min, s->height.max);
+        }
+
+        if (s->offset.x == INT_MIN || s->offset.y == INT_MAX) {
+                DIE("setting offset needs both horizontal and vertical values");
         }
 
         // TODO Implement this with icon sizes as rules
@@ -256,29 +257,68 @@ static void process_conf_file(const gpointer conf_fname, gpointer n_success) {
         check_and_correct_settings(&settings);
 
         finish_ini(ini);
-        free(ini);
+        g_free(ini);
 
         ++(*(int *) n_success);
 }
 
-void load_settings(const char * const path) {
-        settings_init();
+void load_settings(char **const config_paths)
+{
         LOG_D("Setting defaults");
         set_defaults();
 
-        GPtrArray *conf_files = get_conf_files(path);
+        guint length = g_strv_length(config_paths);
+
+        GPtrArray *conf_files;
+
+        if (length != 0) {
+                conf_files = g_ptr_array_new_full(length, g_free);
+                for (int i = 0; config_paths[i]; i++)
+                        g_ptr_array_add(conf_files, g_strdup(config_paths[i]));
+        } else {
+                // Use default locations (and search drop-ins)
+                conf_files = get_conf_files();
+        }
 
         /* Load all conf files and drop-ins, least important first. */
         int n_loaded_confs = 0;
         g_ptr_array_foreach(conf_files, process_conf_file, &n_loaded_confs);
 
         if (0 == n_loaded_confs)
-                LOG_I("No configuration file found, using defaults");
+                LOG_M("No configuration file found, using defaults");
 
-        for (GSList *iter = rules; iter; iter = iter->next) {
-                struct rule *r = iter->data;
-                print_rule(r);
-        }
         g_ptr_array_unref(conf_files);
 }
+
+void settings_free(struct settings *s)
+{
+        gradient_release(s->colors_low.highlight);
+        gradient_release(s->colors_norm.highlight);
+        gradient_release(s->colors_crit.highlight);
+
+        g_free(s->font);
+        g_free(s->format);
+        g_free(s->icons[0]);
+        g_free(s->icons[1]);
+        g_free(s->icons[2]);
+        g_free(s->title);
+        g_free(s->class);
+        g_free(s->monitor);
+        g_free(s->dmenu);
+        g_strfreev(s->dmenu_cmd);
+        g_free(s->browser);
+        g_strfreev(s->browser_cmd);
+        g_strfreev(s->icon_theme);
+        g_free(s->icon_path);
+
+        g_free(s->mouse_left_click);
+        g_free(s->mouse_middle_click);
+        g_free(s->mouse_right_click);
+
+        g_free(s->close_ks.str);
+        g_free(s->close_all_ks.str);
+        g_free(s->history_ks.str);
+        g_free(s->context_ks.str);
+}
+
 /* vim: set ft=c tabstop=8 shiftwidth=8 expandtab textwidth=0: */

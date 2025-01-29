@@ -25,7 +25,7 @@
 #include "notification.h"
 #include "settings.h"
 #include "utils.h"
-#include "output.h" // For checking if wayland is active.
+#include "rules.h"
 
 /* notification lists */
 static GQueue *waiting   = NULL; /**< all new notifications get into here */
@@ -120,7 +120,10 @@ static void queues_swap_notifications(GQueue *queueA,
  */
 static bool queues_notification_is_ready(const struct notification *n, struct dunst_status status, bool shown)
 {
-        ASSERT_OR_RET(status.running, false);
+        if (status.pause_level > n->override_pause_level) {
+                return false;
+        }
+
         if (status.fullscreen && shown)
                 return n && n->fullscreen != FS_PUSHBACK;
         else if (status.fullscreen && !shown)
@@ -172,7 +175,7 @@ int queues_notification_insert(struct notification *n)
                 if (settings.always_run_script) {
                         notification_run_script(n);
                 }
-                LOG_M("Skipping notification: '%s' '%s'", n->body, n->summary);
+                LOG_M("Skipping notification: '%s' '%s'", STR_NN(n->body), STR_NN(n->summary));
                 return 0;
         }
 
@@ -190,8 +193,12 @@ int queues_notification_insert(struct notification *n)
         if (!inserted && STR_FULL(n->stack_tag) && queues_stack_by_tag(n))
                 inserted = true;
 
-        if (!inserted && settings.stack_duplicates && queues_stack_duplicate(n))
+        if (!inserted && settings.stack_duplicates && queues_stack_duplicate(n)){
+                if(settings.sort == SORT_TYPE_UPDATE){
+                        g_queue_sort(displayed, notification_cmp_data, NULL);
+                }
                 inserted = true;
+        }
 
         if (!inserted)
                 g_queue_insert_sorted(waiting, n, notification_cmp_data, NULL);
@@ -200,7 +207,7 @@ int queues_notification_insert(struct notification *n)
                 notification_icon_replace_path(n, n->iconname);
         }
 
-        if (settings.print_notifications)
+        if (print_notifications)
                 notification_print(n);
 
         return n->id;
@@ -215,7 +222,7 @@ int queues_notification_insert(struct notification *n)
 static bool queues_stack_duplicate(struct notification *new)
 {
         GQueue *allqueues[] = { displayed, waiting };
-        for (int i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
+        for (size_t i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
                 for (GList *iter = g_queue_peek_head_link(allqueues[i]); iter;
                      iter = iter->next) {
                         struct notification *old = iter->data;
@@ -256,7 +263,7 @@ static bool queues_stack_duplicate(struct notification *new)
 static bool queues_stack_by_tag(struct notification *new)
 {
         GQueue *allqueues[] = { displayed, waiting };
-        for (int i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
+        for (size_t i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
                 for (GList *iter = g_queue_peek_head_link(allqueues[i]); iter;
                             iter = iter->next) {
                         struct notification *old = iter->data;
@@ -286,7 +293,7 @@ static bool queues_stack_by_tag(struct notification *new)
 bool queues_notification_replace_id(struct notification *new)
 {
         GQueue *allqueues[] = { displayed, waiting };
-        for (int i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
+        for (size_t i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
                 for (GList *iter = g_queue_peek_head_link(allqueues[i]);
                             iter;
                             iter = iter->next) {
@@ -309,12 +316,12 @@ bool queues_notification_replace_id(struct notification *new)
 }
 
 /* see queues.h */
-void queues_notification_close_id(int id, enum reason reason)
+void queues_notification_close_id(gint id, enum reason reason)
 {
         struct notification *target = NULL;
 
         GQueue *allqueues[] = { displayed, waiting };
-        for (int i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
+        for (size_t i = 0; i < sizeof(allqueues)/sizeof(GQueue*); i++) {
                 for (GList *iter = g_queue_peek_head_link(allqueues[i]); iter;
                      iter = iter->next) {
                         struct notification *n = iter->data;
@@ -341,10 +348,16 @@ void queues_notification_close(struct notification *n, enum reason reason)
         queues_notification_close_id(n->id, reason);
 }
 
+static void queues_destroy_notification(struct notification *n, gpointer user_data)
+{
+        (void)user_data;
+        notification_unref(n);
+}
+
 /* see queues.h */
 void queues_history_clear(void)
 {
-        g_queue_foreach(history, (GFunc)notification_unref, NULL);
+        g_queue_foreach(history, (GFunc)queues_destroy_notification, NULL);
         g_queue_clear(history);
 }
 
@@ -361,14 +374,14 @@ void queues_history_pop(void)
 }
 
 /* see queues.h */
-void queues_history_pop_by_id(unsigned int id)
+void queues_history_pop_by_id(gint id)
 {
         struct notification *n = NULL;
 
         if (g_queue_is_empty(history))
                 return;
 
-        // search through the history buffer 
+        // search through the history buffer
         for (GList *iter = g_queue_peek_head_link(history); iter;
                 iter = iter->next) {
                 struct notification *cur = iter->data;
@@ -392,7 +405,8 @@ void queues_history_pop_by_id(unsigned int id)
 void queues_history_push(struct notification *n)
 {
         if (!n->history_ignore) {
-                if (settings.history_length > 0 && history->length >= settings.history_length) {
+                guint maxlen = settings.history_length;
+                if (settings.history_length > 0 && history->length >= maxlen) {
                         struct notification *to_free = g_queue_pop_head(history);
                         notification_unref(to_free);
                 }
@@ -416,7 +430,7 @@ void queues_history_push_all(void)
 }
 
 /* see queues.h */
-void queues_history_remove_by_id(unsigned int id) {
+void queues_history_remove_by_id(gint id) {
         struct notification *n = NULL;
 
         if (g_queue_is_empty(history))
@@ -503,7 +517,7 @@ void queues_update(struct dunst_status status, gint64 time)
                         continue;
                 }
 
-                n->start = time_monotonic_now();
+                n->start = time;
                 notification_run_script(n);
 
                 if (n->skip_display && !n->redisplayed) {
@@ -538,7 +552,7 @@ void queues_update(struct dunst_status status, gint64 time)
                         if (i_waiting && notification_cmp(i_displayed->data, i_waiting->data) > 0) {
                                 struct notification *todisp = i_waiting->data;
 
-                                todisp->start = time_monotonic_now();
+                                todisp->start = time;
                                 notification_run_script(todisp);
 
                                 queues_swap_notifications(displayed, i_displayed, waiting, i_waiting);
@@ -553,45 +567,52 @@ void queues_update(struct dunst_status status, gint64 time)
 /* see queues.h */
 gint64 queues_get_next_datachange(gint64 time)
 {
-        gint64 sleep = G_MAXINT64;
+        gint64 wakeup_time = G_MAXINT64;
+        gint64 next_second = time + S2US(1) - (time % S2US(1));
 
         for (GList *iter = g_queue_peek_head_link(displayed); iter;
                         iter = iter->next) {
                 struct notification *n = iter->data;
-                gint64 ttl = n->timeout - (time - n->start);
+                gint64 timeout_ts = n->start + n->timeout;
 
                 if (n->timeout > 0 && n->locked == 0) {
-                        if (ttl > 0)
-                                sleep = MIN(sleep, ttl);
+                        if (timeout_ts > time)
+                                wakeup_time = MIN(wakeup_time, timeout_ts);
                         else
-                                // while we're processing, the notification already timed out
-                                return 0;
+                                // while we're processing or while locked, the notification already timed out
+                                return time;
                 }
 
                 if (settings.show_age_threshold >= 0) {
                         gint64 age = time - n->timestamp;
 
-                        // sleep exactly until the next shift of the second happens
-                        if (age > settings.show_age_threshold - S2US(1))
-                                sleep = MIN(sleep, (S2US(1) - (age % S2US(1))));
+                        if (age > settings.show_age_threshold - S2US(1)) {
+                                /* Notification age should be updated -- sleep
+                                 * until the next turn of second.
+                                 * This ensures that all notifications' ages
+                                 * will change at once, and that at most one
+                                 * update will occur each second for this
+                                 * purpose. */
+                                wakeup_time = MIN(wakeup_time, next_second);
+                        }
                         else
-                                sleep = MIN(sleep, settings.show_age_threshold - age);
+                                wakeup_time = MIN(wakeup_time, n->timestamp + settings.show_age_threshold);
                 }
         }
 
-        return sleep != G_MAXINT64 ? sleep : -1;
+        return wakeup_time != G_MAXINT64 ? wakeup_time : -1;
 }
 
 
 
 
 /* see queues.h */
-struct notification* queues_get_by_id(int id)
+struct notification* queues_get_by_id(gint id)
 {
         assert(id > 0);
 
         GQueue *recqueues[] = { displayed, waiting, history };
-        for (int i = 0; i < sizeof(recqueues)/sizeof(GQueue*); i++) {
+        for (size_t i = 0; i < sizeof(recqueues)/sizeof(GQueue*); i++) {
                 for (GList *iter = g_queue_peek_head_link(recqueues[i]); iter;
                      iter = iter->next) {
                         struct notification *cur = iter->data;
@@ -601,6 +622,21 @@ struct notification* queues_get_by_id(int id)
         }
 
         return NULL;
+}
+
+void queues_reapply_all_rules(void)
+{
+        GQueue *recqueues[] = { displayed, waiting, history };
+        for (size_t i = 0; i < sizeof(recqueues)/sizeof(GQueue*); i++) {
+                for (GList *iter = g_queue_peek_head_link(recqueues[i]); iter;
+                     iter = iter->next) {
+                        struct notification *cur = iter->data;
+                        if (cur->original) {
+                                rule_apply(cur->original, cur, false);
+                        }
+                        rule_apply_all(cur);
+                }
+        }
 }
 
 /**

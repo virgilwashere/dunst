@@ -11,7 +11,8 @@
 
 #include "utils.h"
 
-static GLogLevelFlags log_level = G_LOG_LEVEL_WARNING;
+// NOTE: Keep updated with the dunst manual
+static GLogLevelFlags log_level = G_LOG_LEVEL_MESSAGE;
 
 /* see log.h */
 static const char *log_level_to_string(GLogLevelFlags level)
@@ -73,6 +74,8 @@ static void dunst_log_handler(
                 const gchar    *message,
                 gpointer        testing)
 {
+        (void)log_domain;
+
         if (testing)
                 log_level = G_LOG_LEVEL_ERROR;
 
